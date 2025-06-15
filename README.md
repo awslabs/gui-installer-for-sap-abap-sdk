@@ -16,7 +16,7 @@ This project is about creating a standalone SAP ABAP report for streamlining the
 
 ## How to use 
 
-Create a new report in ADT / SE80 / SE38 on an SAP system where you want to use the GUI installer, give it a valid name in a valid namespace (Z | Y | whatever you have access to), <b>copy & paste</b> the source code from the latest build into it and hit execute.
+Create a new report in ADT / SE80 / SE38 on an SAP system where you want to use the GUI installer, give it a valid name in a valid namespace (Z | Y | whatever you have access to), <b>copy & paste</b> the source code from the latest build into it, activate and hit execute.
 
 ## Current limitations
 - Only supports NetWeaver 7.4 and higher based SAP systems (same [prerequisite](https://docs.aws.amazon.com/sdk-for-sapabap/latest/developer-guide/prerequisites.html#sdk) as the AWS SDK for SAP ABAP)
