@@ -5,7 +5,7 @@ Latest: [/awslabs/sdk_installer.prog.abap](https://github.com/awslabs/gui-instal
 This project is about creating a standalone SAP ABAP report for streamlining the installation and maintenance of the [AWS SDK for SAP ABAP](https://docs.aws.amazon.com/sdk-for-sapabap/latest/developer-guide/home.html). In order to provide a plug 'n' play experience, the report was designed to be installed on compatible ABAP-based system via simply <b>copying & pasting</b> the latest version into a corresponding report on a user's SAP system. The report offers a graphical user interface and automation functions, which help with:
 
 - Downloading the required Amazon root certificates from [Amazon trust services](https://www.amazontrust.com/repository/) and adding them to STRUST
-- Downloading the required AWS SDK for SAP ABAP zip files
+- Downloading the required AWS SDK for SAP ABAP .zip files
 - Unpacking, adding and importing transports for to be installed SDK modules
 - Unpacking, adding and importing transports for updating installed SDK modules
 - Deleting no longer needed SDK modules
