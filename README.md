@@ -10,7 +10,7 @@ This project is about creating a standalone SAP ABAP report for streamlining the
 - Updating installed SDK modules
 - Deleting no longer needed SDK modules
 - Browsing through installed and available modules in a comprehensive fashion
-- Check on individual modules' transport log, object list, and API documentation
+- Check on individual modules' transport log, object list, and API [documentation](https://docs.aws.amazon.com/sdk-for-sap-abap/v1/api/latest/index.html)
 
 ![image](https://github.com/user-attachments/assets/35213190-76c5-4319-ab64-3094170b67ca)
 
