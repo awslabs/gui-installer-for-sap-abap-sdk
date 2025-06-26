@@ -22,7 +22,7 @@
 *
 "-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~--~-~-~-~-
 
-REPORT /AWSLABS/SDK_INSTALLER.
+REPORT /awslabs/sdk_installer.
 
 CLASS lcl_abapsdk_package_manager DEFINITION DEFERRED.
 CLASS lcl_abapsdk_pm_tree_controller DEFINITION DEFERRED.
@@ -447,14 +447,14 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
     ls_strust_identity-pse_descript = 'SSL Client (Standard)' ##NO_TEXT.
     ls_strust_identity-sprsl = 'E'.
 
-    " root cert URLS set in set_amazon_root_cert_values
-    LOOP AT mt_amazon_root_certs INTO wa_amazon_root_cert.
+     " root cert URLS set in set_amazon_root_cert_values
+    LOOP AT mt_amazon_root_certs INTO wa_amazon_root_cert FROM 1 TO 4.
 
       IF wa_amazon_root_cert-installed = abap_true.
         CONTINUE.
       ENDIF.
 
-      DATA(root_cert_name) = segment( val   = wa_amazon_root_cert-uri
+      DATA(root_cert_name_http) = segment( val   = wa_amazon_root_cert-uri
                                       sep   = '/'
                                       index = -1 ).
       wa_amazon_root_cert-binary = me->download( i_absolute_uri = wa_amazon_root_cert-uri
@@ -471,7 +471,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
 
     ENDLOOP.
 
-    CALL FUNCTION 'ICM_SSL_PSE_CHANGED'
+     CALL FUNCTION 'ICM_SSL_PSE_CHANGED'
       EXCEPTIONS
         icm_op_failed       = 1
         icm_get_serv_failed = 2
@@ -480,6 +480,32 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
     IF sy-subrc <> 0.
       RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Error updating PSE| ##NO_TEXT.
     ENDIF.
+
+    " root cert URLS set in set_amazon_root_cert_values
+    LOOP AT mt_amazon_root_certs INTO wa_amazon_root_cert FROM 5.
+
+      IF wa_amazon_root_cert-installed = abap_true.
+        CONTINUE.
+      ENDIF.
+
+      DATA(root_cert_name_https) = segment( val   = wa_amazon_root_cert-uri
+                                      sep   = '/'
+                                      index = -1 ).
+      wa_amazon_root_cert-binary = me->download( i_absolute_uri = wa_amazon_root_cert-uri
+                                                 i_blankstocrlf = abap_false ).
+
+
+      CALL FUNCTION 'SSFR_PUT_CERTIFICATE'
+        EXPORTING
+          is_strust_identity = ls_strust_identity
+          iv_certificate     = wa_amazon_root_cert-binary
+        TABLES
+          et_bapiret2        = lt_bapiret2.
+      check_bapiret( lt_bapiret2 ).
+
+    ENDLOOP.
+
+
 
     MESSAGE |Certificates installed.| TYPE 'S' ##NO_TEXT.
 
@@ -491,7 +517,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
 
     DATA lt_missing_certs TYPE tt_amazon_root_certificate.
     LOOP AT mt_amazon_root_certs INTO DATA(wa_amazon_root_cert).
-      IF wa_amazon_root_cert-installed = abap_false.
+      IF wa_amazon_root_cert-installed = abap_false AND sy-tabix > 4.
         APPEND wa_amazon_root_cert TO lt_missing_certs.
       ENDIF.
     ENDLOOP.
@@ -541,26 +567,42 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD set_amazon_root_cert_values.
-    INSERT VALUE #( subject = 'CN=Amazon Root CA 1, O=Amazon, C=US'
-                    uri = 'http://www.amazontrust.com/repository/AmazonRootCA1.cer'
+    INSERT VALUE #( subject = 'CN=Amazon RSA 2048 M01, O=Amazon, C=US'
+                    uri = 'http://crt.r2m01.amazontrust.com/r2m01.cer'
                     binary = ''
                     installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 1 ##NO_TEXT.
-    INSERT VALUE #( subject = 'CN=Amazon Root CA 2, O=Amazon, C=US'
-                    uri = 'http://www.amazontrust.com/repository/AmazonRootCA2.cer'
+    INSERT VALUE #( subject = 'CN=Amazon RSA 2048 M02, O=Amazon, C=US'
+                    uri = 'http://crt.r2m01.amazontrust.com/r2m02.cer'
                     binary = ''
                     installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 2 ##NO_TEXT.
-    INSERT VALUE #( subject = 'CN=Amazon Root CA 3, O=Amazon, C=US'
-                    uri = 'http://www.amazontrust.com/repository/AmazonRootCA3.cer'
+    INSERT VALUE #( subject = 'CN=Amazon RSA 2048 M03, O=Amazon, C=US'
+                    uri = 'http://crt.r2m01.amazontrust.com/r2m03.cer'
                     binary = ''
                     installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 3 ##NO_TEXT.
-    INSERT VALUE #( subject = 'CN=Amazon Root CA 4, O=Amazon, C=US'
-                    uri = 'http://www.amazontrust.com/repository/AmazonRootCA4.cer'
+    INSERT VALUE #( subject = 'CN=Amazon RSA 2048 M04, O=Amazon, C=US'
+                    uri = 'http://crt.r2m01.amazontrust.com/r2m04.cer'
                     binary = ''
                     installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 4 ##NO_TEXT.
-    INSERT VALUE #( subject = 'CN=Starfield Services Root Certificate Authority - G2, O="Starfield Technologies, Inc.", L=Scottsdale, SP=Arizona, C=US'
-                    uri = 'http://www.amazontrust.com/repository/SFSRootCAG2.cer'
+    INSERT VALUE #( subject = 'CN=Amazon Root CA 1, O=Amazon, C=US'
+                    uri = 'https://www.amazontrust.com/repository/AmazonRootCA1.cer'
                     binary = ''
                     installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 5 ##NO_TEXT.
+    INSERT VALUE #( subject = 'CN=Amazon Root CA 2, O=Amazon, C=US'
+                    uri = 'https://www.amazontrust.com/repository/AmazonRootCA2.cer'
+                    binary = ''
+                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 6 ##NO_TEXT.
+    INSERT VALUE #( subject = 'CN=Amazon Root CA 3, O=Amazon, C=US'
+                    uri = 'https://www.amazontrust.com/repository/AmazonRootCA3.cer'
+                    binary = ''
+                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 7 ##NO_TEXT.
+    INSERT VALUE #( subject = 'CN=Amazon Root CA 4, O=Amazon, C=US'
+                    uri = 'https://www.amazontrust.com/repository/AmazonRootCA4.cer'
+                    binary = ''
+                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 8 ##NO_TEXT.
+    INSERT VALUE #( subject = 'CN=Starfield Services Root Certificate Authority - G2, O="Starfield Technologies, Inc.", L=Scottsdale, SP=Arizona, C=US'
+                    uri = 'https://www.amazontrust.com/repository/SFSRootCAG2.cer'
+                    binary = ''
+                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 9 ##NO_TEXT.
   ENDMETHOD.
 
   METHOD set_amazon_root_cert_status.
@@ -1484,7 +1526,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
 
     lv_result = abap_false.
 
-    lv_url = mt_amazon_root_certs[ 1 ]-uri.
+    lv_url = 'http://ocsp.r2m02.amazontrust.com'.
 
     TRY.
         cl_http_client=>create_by_url( EXPORTING url = lv_url IMPORTING client = lr_http_client ).
@@ -1997,7 +2039,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
 
     IF NOT line_exists( mt_abapsdk_zipfiles[ op = 'install' version = i_version ] )
       AND NOT line_exists( mt_abapsdk_zipfiles[ op = 'uninstall' version = i_version ] ).
-        INSERT LINES OF lt_abapsdk_zipfiles INTO TABLE mt_abapsdk_zipfiles.
+      INSERT LINES OF lt_abapsdk_zipfiles INTO TABLE mt_abapsdk_zipfiles.
     ELSE.
       LOOP AT mt_abapsdk_zipfiles ASSIGNING FIELD-SYMBOL(<fs_zip>).
         LOOP AT lt_abapsdk_zipfiles INTO wa_abapsdk_zipfile.
@@ -3769,7 +3811,7 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
             r_result = abap_true.
           ELSE.
             r_result = abap_false.
-            return.
+            RETURN.
           ENDIF.
 
         ENDIF.
@@ -3815,7 +3857,7 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
           r_result = abap_true.
         ENDIF.
 
-        return.
+        RETURN.
 
       WHEN 'uninstall'.
 
@@ -3862,7 +3904,7 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
           r_result = abap_true.
         ENDIF.
 
-        return.
+        RETURN.
       WHEN OTHERS.
 
     ENDCASE.
