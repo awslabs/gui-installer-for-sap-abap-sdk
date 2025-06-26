@@ -542,23 +542,23 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
 
   METHOD set_amazon_root_cert_values.
     INSERT VALUE #( subject = 'CN=Amazon Root CA 1, O=Amazon, C=US'
-                    uri = 'https://www.amazontrust.com/repository/AmazonRootCA1.cer'
+                    uri = 'http://www.amazontrust.com/repository/AmazonRootCA1.cer'
                     binary = ''
                     installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 1 ##NO_TEXT.
     INSERT VALUE #( subject = 'CN=Amazon Root CA 2, O=Amazon, C=US'
-                    uri = 'https://www.amazontrust.com/repository/AmazonRootCA2.cer'
+                    uri = 'http://www.amazontrust.com/repository/AmazonRootCA2.cer'
                     binary = ''
                     installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 2 ##NO_TEXT.
     INSERT VALUE #( subject = 'CN=Amazon Root CA 3, O=Amazon, C=US'
-                    uri = 'https://www.amazontrust.com/repository/AmazonRootCA3.cer'
+                    uri = 'http://www.amazontrust.com/repository/AmazonRootCA3.cer'
                     binary = ''
                     installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 3 ##NO_TEXT.
     INSERT VALUE #( subject = 'CN=Amazon Root CA 4, O=Amazon, C=US'
-                    uri = 'https://www.amazontrust.com/repository/AmazonRootCA4.cer'
+                    uri = 'http://www.amazontrust.com/repository/AmazonRootCA4.cer'
                     binary = ''
                     installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 4 ##NO_TEXT.
     INSERT VALUE #( subject = 'CN=Starfield Services Root Certificate Authority - G2, O="Starfield Technologies, Inc.", L=Scottsdale, SP=Arizona, C=US'
-                    uri = 'https://www.amazontrust.com/repository/SFSRootCAG2.cer'
+                    uri = 'http://www.amazontrust.com/repository/SFSRootCAG2.cer'
                     binary = ''
                     installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 5 ##NO_TEXT.
   ENDMETHOD.
