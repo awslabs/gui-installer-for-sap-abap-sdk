@@ -447,7 +447,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
     ls_strust_identity-pse_descript = 'SSL Client (Standard)' ##NO_TEXT.
     ls_strust_identity-sprsl = 'E'.
 
-     " root cert URLS set in set_amazon_root_cert_values
+    " root cert URLS set in set_amazon_root_cert_values
     LOOP AT mt_amazon_root_certs INTO wa_amazon_root_cert FROM 1 TO 4.
 
       IF wa_amazon_root_cert-installed = abap_true.
@@ -455,8 +455,8 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
       ENDIF.
 
       DATA(root_cert_name_http) = segment( val   = wa_amazon_root_cert-uri
-                                      sep   = '/'
-                                      index = -1 ).
+                                           sep   = '/'
+                                           index = -1 ).
       wa_amazon_root_cert-binary = me->download( i_absolute_uri = wa_amazon_root_cert-uri
                                                  i_blankstocrlf = abap_false ).
 
@@ -471,7 +471,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
 
     ENDLOOP.
 
-     CALL FUNCTION 'ICM_SSL_PSE_CHANGED'
+    CALL FUNCTION 'ICM_SSL_PSE_CHANGED'
       EXCEPTIONS
         icm_op_failed       = 1
         icm_get_serv_failed = 2
@@ -489,8 +489,8 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
       ENDIF.
 
       DATA(root_cert_name_https) = segment( val   = wa_amazon_root_cert-uri
-                                      sep   = '/'
-                                      index = -1 ).
+                                            sep   = '/'
+                                            index = -1 ).
       wa_amazon_root_cert-binary = me->download( i_absolute_uri = wa_amazon_root_cert-uri
                                                  i_blankstocrlf = abap_false ).
 
@@ -674,30 +674,38 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
 
   METHOD cmp_version_string.
 
-    SPLIT i_string1 AT '.' INTO TABLE DATA(lt_string1).
-    SPLIT i_string2 AT '.' INTO TABLE DATA(lt_string2).
+    IF i_string1 CO '0123456789.' AND
+       i_string2 CO '0123456789.' AND
+       i_string1 CP '*.*.*' AND
+       i_string2 CP '*.*.*'.
+      SPLIT i_string1 AT '.' INTO TABLE DATA(lt_string1).
+      SPLIT i_string2 AT '.' INTO TABLE DATA(lt_string2).
 
-    DATA(l_result) = 0.
+      DATA(l_result) = 0.
 
-    DATA wa_string1 TYPE i.
-    DATA wa_string2 TYPE i.
+      DATA wa_string1 TYPE i.
+      DATA wa_string2 TYPE i.
 
-    DO lines( lt_string1 ) TIMES.
+      DO lines( lt_string1 ) TIMES.
 
-      wa_string1 = lt_string1[ sy-index ].
-      wa_string2 = lt_string2[ sy-index ].
+        wa_string1 = lt_string1[ sy-index ].
+        wa_string2 = lt_string2[ sy-index ].
 
-      IF wa_string1 > wa_string2.
-        l_result = 1.
-        EXIT.
-      ELSEIF wa_string1 < wa_string2.
-        l_result = -1.
-        EXIT.
-      ELSE.
-        l_result = 0.
-      ENDIF.
+        IF wa_string1 > wa_string2.
+          l_result = 1.
+          EXIT.
+        ELSEIF wa_string1 < wa_string2.
+          l_result = -1.
+          EXIT.
+        ELSE.
+          l_result = 0.
+        ENDIF.
 
-    ENDDO.
+      ENDDO.
+    ELSE.
+
+      l_result = -1.
+    ENDIF.
 
     r_result = l_result.
 
@@ -921,7 +929,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
 
       " if not already set as part of core
       IF <fs_installed_module>-avers IS INITIAL AND lines( mt_available_modules_inst ) > 0.
-        <fs_installed_module>-avers = me->mt_available_modules_inst[ tla = <fs_installed_module>-tla ]-avers.
+        <fs_installed_module>-avers = VALUE #( me->mt_available_modules_inst[ tla = <fs_installed_module>-tla ]-avers DEFAULT 'n.a.' ).
       ENDIF.
 
       <fs_installed_module>-ctransport = ls_tmstpalog-trkorr.
@@ -2549,8 +2557,8 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
         wa_core_module-op_code = c_operation_update.
       ELSE.
         wa_core_module-op_icon = '@0A@'.
-        wa_core_module-op_text = 'Current version higher than available version.' ##NO_TEXT.
-        wa_core_module-op_code = c_operation_delete.
+        wa_core_module-op_text = 'Current version higher than available version. Module may be deprecated.' ##NO_TEXT.
+        wa_core_module-op_code = c_operation_none.
       ENDIF.
 
     ELSE.
@@ -2709,31 +2717,29 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 
       ELSE.
 
-        wa_installed_module-avers = mt_available_modules_inst[ tla = wa_installed_module-tla ]-avers.
-        wa_installed_module-atransport = mt_available_modules_inst[ tla = wa_installed_module-tla ]-atransport.
 
+
+        wa_installed_module-avers = VALUE #( mt_available_modules_inst[ tla = wa_installed_module-tla ]-avers DEFAULT 'n.a.' ).
+        wa_installed_module-atransport = VALUE #( mt_available_modules_inst[ tla = wa_installed_module-tla ]-atransport DEFAULT 'n.a.' ).
 
         l_text = wa_installed_module-tla.
 
-
-
-
-
-        IF mr_abapsdk_package_manager->cmp_version_string( i_string1 = mt_available_modules_inst[ tla = wa_installed_module-tla ]-avers
+        IF mr_abapsdk_package_manager->cmp_version_string( i_string1 = wa_installed_module-avers
                                                       i_string2 = wa_installed_module-cvers ) = 0.
           wa_installed_module-op_icon = '@08@'.
           wa_installed_module-op_text = 'Module up to date, no operation planned.' ##NO_TEXT.
           wa_installed_module-op_code = c_operation_none.
-        ELSEIF mr_abapsdk_package_manager->cmp_version_string( i_string1 = mt_available_modules_inst[ tla = wa_installed_module-tla ]-avers
+        ELSEIF mr_abapsdk_package_manager->cmp_version_string( i_string1 = wa_installed_module-avers
                                                           i_string2 = wa_installed_module-cvers ) = 1.
           wa_installed_module-op_icon = '@09@'.
           wa_installed_module-op_text = 'Module will be updated.' ##NO_TEXT.
           wa_installed_module-op_code = c_operation_update.
         ELSE.
           wa_installed_module-op_icon = '@0A@'.
-          wa_installed_module-op_text = 'Current version higher than available version.' ##NO_TEXT.
-          wa_installed_module-op_code = c_operation_delete.
+          wa_installed_module-op_text = 'Current version higher than available version. Module may be deprecated.' ##NO_TEXT.
+          wa_installed_module-op_code = c_operation_none.
         ENDIF.
+
 
 
 
@@ -2867,6 +2873,7 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 
 
     "------ Available Modules subfolder Other Modules
+    DATA(l_inst_deprecated_mod_no) = lines( mt_installed_modules ) - l_avail_modules_no.
     DATA(l_other_modules_no) = l_avail_modules_no - l_popular_modules_no.
     DATA(l_other_modules_text) = 'Other Modules (' && l_other_modules_no && ')' ##NO_TEXT.
     DATA(l_other_modules_lvc) = CONV lvc_value( l_other_modules_text ).
@@ -3128,6 +3135,8 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
                                          boolean = ' ' ).
           lr_functions->enable_function( name    = 'DOW_TRAK'
                                          boolean = ' ' ).
+          lr_functions->enable_function( name    = 'INS_ALL'
+                                         boolean = ' ' ).
 
         ELSE. "if not, activate all the buttons
 
@@ -3173,6 +3182,8 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
           lr_functions->enable_function( name    = 'DOW_CERT'
                                          boolean = 'X' ).
           lr_functions->enable_function( name    = 'DOW_TRAK'
+                                         boolean = 'X' ).
+          lr_functions->enable_function( name    = 'INS_ALL'
                                          boolean = 'X' ).
         ENDIF.
       CATCH cx_salv_wrong_call INTO DATA(r_ex1).
@@ -3353,6 +3364,13 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
           icon     = '@X1@'
           text     = 'Download current SDK'
           tooltip  = 'Download current ABAP SDK Transport Kits'
+          position = if_salv_c_function_position=>left_of_salv_functions ) ##NO_TEXT.
+
+        lr_functions->add_function(
+          name     = 'INS_ALL'
+          icon     = '@6N@'
+          text     = 'Install all modules'
+          tooltip  = 'Install all available modules'
           position = if_salv_c_function_position=>left_of_salv_functions ) ##NO_TEXT.
 
         refresh_buttons( ).
@@ -4323,6 +4341,51 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 
             mr_abapsdk_package_manager->download_abapsdk_zipfiles( i_file_list = mr_abapsdk_package_manager->mt_abapsdk_zipfiles ).
 
+          WHEN 'INS_ALL'.
+
+            lv_target_version = 'LATEST'.
+
+
+
+            CLEAR: mt_modules_to_be_installed.
+            CLEAR: mt_modules_to_be_deleted.
+            DATA(lt_available_modules_cv) = mr_abapsdk_package_manager->get_abapsdk_avail_modules_json( i_operation = 'install'
+                                                                                                        i_source    = 'web'
+                                                                                                        i_version   = lv_target_version ).
+            DATA: wa_available_module_cv TYPE ts_abapsdk_module.
+            LOOP AT lt_available_modules_cv INTO wa_available_module_cv.
+              INSERT VALUE ts_abapsdk_tla( tla = wa_available_module_cv-tla version = lv_target_version ) INTO TABLE mt_modules_to_be_installed .
+            ENDLOOP.
+
+
+
+            "IF check_selection_sanity( it_modules_tbi = mt_modules_to_be_installed
+            "                                       it_modules_tbd = mt_modules_to_be_deleted
+            "                                       i_salv_function = e_salv_function
+            "                                       i_op = 'install' ) = abap_false.
+            "  RETURN.
+            "ENDIF.
+
+            IF lines( mt_modules_to_be_installed ) > 0.
+
+              IF check_abapsdk_zipfiles_present( i_version = lv_target_version ) = abap_false.
+                RETURN.
+              ENDIF.
+
+              IF check_abapsdk_zipfiles_current( ) = abap_false.
+                RETURN.
+              ENDIF.
+
+            ENDIF.
+
+            l_jobnumber = mr_abapsdk_package_manager->submit_batch_job( i_modules_to_be_installed = mt_modules_to_be_installed
+                                                                        i_modules_to_be_deleted   = mt_modules_to_be_deleted
+                                                                        i_target_version          = lv_target_version ).
+
+            CONCATENATE `Submitted job with number ` l_jobnumber INTO l_job_message ##NO_TEXT.
+            MESSAGE i000(0k) WITH l_job_message.
+
+            refresh( ).
 
           WHEN OTHERS.
 
@@ -4415,9 +4478,15 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
               wa_row-op_icon = '@09@' ##NO_TEXT.
               wa_row-op_code = c_operation_update.
               l_node->set_data_row( wa_row ).
-            ELSE.
+            ELSEIF mr_abapsdk_package_manager->cmp_version_string( i_string1 = mt_installed_modules[ tla = l_tla ]-avers
+                                                          i_string2 = mt_installed_modules[ tla = l_tla ]-cvers ) = 0.
               wa_row-op_text = 'Module up to date, no operation planned.' ##NO_TEXT.
               wa_row-op_icon = '@08@' ##NO_TEXT.
+              wa_row-op_code = c_operation_none.
+              l_node->set_data_row( wa_row ).
+            ELSE.
+              wa_row-op_text = 'Current version higher than available version. Module may be deprecated.' ##NO_TEXT.
+              wa_row-op_icon = '@0A@' ##NO_TEXT.
               wa_row-op_code = c_operation_none.
               l_node->set_data_row( wa_row ).
             ENDIF.
