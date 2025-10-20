@@ -2873,7 +2873,6 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 
 
     "------ Available Modules subfolder Other Modules
-    DATA(l_inst_deprecated_mod_no) = lines( mt_installed_modules ) - l_avail_modules_no.
     DATA(l_other_modules_no) = l_avail_modules_no - l_popular_modules_no.
     DATA(l_other_modules_text) = 'Other Modules (' && l_other_modules_no && ')' ##NO_TEXT.
     DATA(l_other_modules_lvc) = CONV lvc_value( l_other_modules_text ).
