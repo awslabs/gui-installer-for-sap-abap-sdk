@@ -145,6 +145,7 @@ CLASS lcl_abapsdk_package_manager DEFINITION FINAL FRIENDS lcl_abapsdk_pm_tree_c
                         RETURNING VALUE(r_file_xstring)   TYPE xstring,
       get_abapsdk_installed_modules RETURNING VALUE(r_installed_modules) TYPE tt_abapsdk_module
                                     RAISING   lcx_error,
+      get_abapsdk_deprecated_mod_ins RETURNING VALUE(r_deprecated_modules) TYPE tt_abapsdk_module,
       get_abapsdk_avail_modules_json IMPORTING i_operation                TYPE string
                                                i_source                   TYPE string
                                                i_version                  TYPE string DEFAULT 'LATEST'
@@ -960,413 +961,375 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
 
   ENDMETHOD.
 
-  METHOD get_file_from_zip.
-    DATA lv_zipfile_content TYPE xstring.
+  METHOD get_abapsdk_deprecated_mod_ins.
+
     TRY.
-        open_for_input( i_zipfile_absolute_path ).
-        READ DATASET i_zipfile_absolute_path INTO lv_zipfile_content.
-        CLOSE DATASET i_zipfile_absolute_path.
-      CATCH cx_sy_file_authority INTO DATA(r_ex1).
-        MESSAGE r_ex1->get_text( ) TYPE 'I' DISPLAY LIKE 'E'.
-        RETURN.
-      CATCH cx_sy_file_access_error INTO DATA(r_ex2).
-        MESSAGE r_ex2->get_text( ) TYPE 'I' DISPLAY LIKE 'E'.
-        RETURN.
-      CATCH cx_root INTO DATA(r_ex).
-        MESSAGE r_ex->get_text( ) TYPE 'I' DISPLAY LIKE 'E'.
-        RETURN.
+        DATA(lt_installed_modules) = get_abapsdk_installed_modules( ).
+      CATCH lcx_error.
     ENDTRY.
 
-    DATA(r_zip) = NEW cl_abap_zip( ).
-
-    r_zip->load( zip = lv_zipfile_content ).
-
-    r_zip->get( EXPORTING  name                    = i_file_to_retrieve
-                IMPORTING  content                 = r_file_xstring
-                EXCEPTIONS zip_index_error         = 1
-                           zip_decompression_error = 2
-                           OTHERS                  = 3 ).
-
-    CASE sy-subrc.
-      WHEN 0.
-        " success
-      WHEN 1.
-        MESSAGE 'Zip Index Error' TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-        RETURN.
-      WHEN 2.
-        MESSAGE 'Zip Decompression Error' TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-        RETURN.
-      WHEN OTHERS.
-        MESSAGE 'Unknown Zip error' TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-        RETURN.
-    ENDCASE.
-  ENDMETHOD.
-
-  METHOD get_abapsdk_avail_modules_json.
-
-    DATA l_abapsdk_json TYPE w3_url.
-    DATA lts_abapsdk_avail_modules TYPE tt_abapsdk_module.
-
-    CASE i_source.
-      WHEN 'web'.
-
-        DATA(l_jsonx) = me->download( i_absolute_uri = mt_abapsdk_zipfiles[ op = i_operation version = i_version ]-json_web
-                                      i_blankstocrlf = abap_false ).
-
-
-      WHEN 'zip'.
-
-        l_jsonx = get_file_from_zip( i_zipfile_absolute_path = mt_abapsdk_zipfiles[ op = i_operation version = i_version ]-path
-                                     i_file_to_retrieve      = m_sdk_index_json_zip_path ).
-
-      WHEN 'others'.
-
-    ENDCASE.
-
-
-    DATA(l_reader) = cl_sxml_string_reader=>create( input       = l_jsonx
-                                                    normalizing = abap_true ).
-
-
-    DATA: BEGIN OF wa_node,
-            node_type TYPE string,
-            name      TYPE string,
-            value     TYPE string,
-            depth     TYPE i VALUE 0,
-          END OF wa_node,
-          lt_transport_nodes LIKE TABLE OF wa_node.
-
-    DATA depth_counter TYPE i VALUE 0.
-
-    DO.
-      CLEAR wa_node.
-      DATA(l_node) = l_reader->read_next_node( ).
-      IF l_node IS INITIAL.
-        EXIT.
+    LOOP AT lt_installed_modules INTO DATA(wa_inst).
+      IF wa_inst-tla = 's3' OR
+         wa_inst-tla = 'rla' OR
+         wa_inst-tla = 'sts' OR
+         wa_inst-tla = 'smr'.
+       continue.
+      ELSE.
+        READ TABLE mt_available_modules_inst WITH KEY tla = wa_inst-tla TRANSPORTING NO FIELDS.
+        IF sy-subrc <> 0.
+          APPEND VALUE #( tla = wa_inst-tla ) TO r_deprecated_modules.
+        ENDIF.
       ENDIF.
-      CASE l_node->type.
-        WHEN if_sxml_node=>co_nt_element_open.
-          depth_counter = depth_counter + 1.
-          DATA(l_open_element) = CAST if_sxml_open_element( l_node ).
-          DATA(lt_attributes) = l_open_element->get_attributes( ).
-          LOOP AT lt_attributes INTO DATA(l_attribute_node).
-            wa_node-node_type = 'attribute'.
-            wa_node-name = l_attribute_node->qname-name.
-            IF l_attribute_node->value_type = if_sxml_value=>co_vt_text.
-              wa_node-value = l_attribute_node->get_value( ).
+     ENDLOOP.
+
+    ENDMETHOD.
+
+
+    METHOD get_file_from_zip.
+      DATA lv_zipfile_content TYPE xstring.
+      TRY.
+          open_for_input( i_zipfile_absolute_path ).
+          READ DATASET i_zipfile_absolute_path INTO lv_zipfile_content.
+          CLOSE DATASET i_zipfile_absolute_path.
+        CATCH cx_sy_file_authority INTO DATA(r_ex1).
+          MESSAGE r_ex1->get_text( ) TYPE 'I' DISPLAY LIKE 'E'.
+          RETURN.
+        CATCH cx_sy_file_access_error INTO DATA(r_ex2).
+          MESSAGE r_ex2->get_text( ) TYPE 'I' DISPLAY LIKE 'E'.
+          RETURN.
+        CATCH cx_root INTO DATA(r_ex).
+          MESSAGE r_ex->get_text( ) TYPE 'I' DISPLAY LIKE 'E'.
+          RETURN.
+      ENDTRY.
+
+      DATA(r_zip) = NEW cl_abap_zip( ).
+
+      r_zip->load( zip = lv_zipfile_content ).
+
+      r_zip->get( EXPORTING  name                    = i_file_to_retrieve
+                  IMPORTING  content                 = r_file_xstring
+                  EXCEPTIONS zip_index_error         = 1
+                             zip_decompression_error = 2
+                             OTHERS                  = 3 ).
+
+      CASE sy-subrc.
+        WHEN 0.
+          " success
+        WHEN 1.
+          MESSAGE 'Zip Index Error' TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
+          RETURN.
+        WHEN 2.
+          MESSAGE 'Zip Decompression Error' TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
+          RETURN.
+        WHEN OTHERS.
+          MESSAGE 'Unknown Zip error' TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
+          RETURN.
+      ENDCASE.
+    ENDMETHOD.
+
+    METHOD get_abapsdk_avail_modules_json.
+
+      DATA l_abapsdk_json TYPE w3_url.
+      DATA lts_abapsdk_avail_modules TYPE tt_abapsdk_module.
+
+      CASE i_source.
+        WHEN 'web'.
+
+          DATA(l_jsonx) = me->download( i_absolute_uri = mt_abapsdk_zipfiles[ op = i_operation version = i_version ]-json_web
+                                        i_blankstocrlf = abap_false ).
+
+
+        WHEN 'zip'.
+
+          l_jsonx = get_file_from_zip( i_zipfile_absolute_path = mt_abapsdk_zipfiles[ op = i_operation version = i_version ]-path
+                                       i_file_to_retrieve      = m_sdk_index_json_zip_path ).
+
+        WHEN 'others'.
+
+      ENDCASE.
+
+
+      DATA(l_reader) = cl_sxml_string_reader=>create( input       = l_jsonx
+                                                      normalizing = abap_true ).
+
+
+      DATA: BEGIN OF wa_node,
+              node_type TYPE string,
+              name      TYPE string,
+              value     TYPE string,
+              depth     TYPE i VALUE 0,
+            END OF wa_node,
+            lt_transport_nodes LIKE TABLE OF wa_node.
+
+      DATA depth_counter TYPE i VALUE 0.
+
+      DO.
+        CLEAR wa_node.
+        DATA(l_node) = l_reader->read_next_node( ).
+        IF l_node IS INITIAL.
+          EXIT.
+        ENDIF.
+        CASE l_node->type.
+          WHEN if_sxml_node=>co_nt_element_open.
+            depth_counter = depth_counter + 1.
+            DATA(l_open_element) = CAST if_sxml_open_element( l_node ).
+            DATA(lt_attributes) = l_open_element->get_attributes( ).
+            LOOP AT lt_attributes INTO DATA(l_attribute_node).
+              wa_node-node_type = 'attribute'.
+              wa_node-name = l_attribute_node->qname-name.
+              IF l_attribute_node->value_type = if_sxml_value=>co_vt_text.
+                wa_node-value = l_attribute_node->get_value( ).
+              ENDIF.
+              wa_node-depth = depth_counter.
+              APPEND wa_node TO lt_transport_nodes.
+            ENDLOOP.
+            CONTINUE.
+          WHEN if_sxml_node=>co_nt_element_close.
+            depth_counter = depth_counter - 1.
+            CONTINUE.
+          WHEN if_sxml_node=>co_nt_value.
+            DATA(l_value_node) = CAST if_sxml_value_node( l_node ).
+            wa_node-node_type = 'value'.
+            IF l_value_node->value_type = if_sxml_value=>co_vt_text.
+              wa_node-value = l_value_node->get_value( ).
             ENDIF.
             wa_node-depth = depth_counter.
             APPEND wa_node TO lt_transport_nodes.
-          ENDLOOP.
+            CONTINUE.
+        ENDCASE.
+
+      ENDDO.
+
+      DATA wa_module TYPE ts_abapsdk_module.
+      DATA(i) = 1.
+      DATA(j) = 0.  " Offset for TLA -> name
+      DATA(k) = 0.  " Offset for Groups -> popular -> title -> tla
+
+      LOOP AT lt_transport_nodes ASSIGNING FIELD-SYMBOL(<ls_transport_node>).
+
+        CLEAR wa_module.
+        IF <ls_transport_node>-value = 'core'.
+          wa_module-tla = 'core'. " tla nametag
+          wa_module-atransport = lt_transport_nodes[ 8 ]-value. " transport name
+          wa_module-avers = lt_transport_nodes[ 4 ]-value. " version
+          wa_module-is_core = abap_true. " is core
+          INSERT wa_module INTO TABLE lts_abapsdk_avail_modules.
           CONTINUE.
-        WHEN if_sxml_node=>co_nt_element_close.
-          depth_counter = depth_counter - 1.
+        ENDIF.
+
+        IF i >= 16 AND j < i AND i < lines( lt_transport_nodes ) AND lt_transport_nodes[ i ]-depth > 2.
+
+          wa_module-tla = lt_transport_nodes[ i ]-value. " tla nametag
+          wa_module-atransport = lt_transport_nodes[ i + 2 ]-value. " transport name
+          wa_module-is_core = lt_transport_nodes[ i + 6 ]-value. " is core
+          wa_module-avers = lt_transport_nodes[ 4 ]-value. " version
+          INSERT wa_module INTO TABLE lts_abapsdk_avail_modules.
+          i = i + 7.
+        ELSEIF i < 16.
+          i = i + 1.
           CONTINUE.
-        WHEN if_sxml_node=>co_nt_value.
-          DATA(l_value_node) = CAST if_sxml_value_node( l_node ).
-          wa_node-node_type = 'value'.
-          IF l_value_node->value_type = if_sxml_value=>co_vt_text.
-            wa_node-value = l_value_node->get_value( ).
-          ENDIF.
-          wa_node-depth = depth_counter.
-          APPEND wa_node TO lt_transport_nodes.
-          CONTINUE.
-      ENDCASE.
-
-    ENDDO.
-
-    DATA wa_module TYPE ts_abapsdk_module.
-    DATA(i) = 1.
-    DATA(j) = 0.  " Offset for TLA -> name
-    DATA(k) = 0.  " Offset for Groups -> popular -> title -> tla
-
-    LOOP AT lt_transport_nodes ASSIGNING FIELD-SYMBOL(<ls_transport_node>).
-
-      CLEAR wa_module.
-      IF <ls_transport_node>-value = 'core'.
-        wa_module-tla = 'core'. " tla nametag
-        wa_module-atransport = lt_transport_nodes[ 8 ]-value. " transport name
-        wa_module-avers = lt_transport_nodes[ 4 ]-value. " version
-        wa_module-is_core = abap_true. " is core
-        INSERT wa_module INTO TABLE lts_abapsdk_avail_modules.
-        CONTINUE.
-      ENDIF.
-
-      IF i >= 16 AND j < i AND i < lines( lt_transport_nodes ) AND lt_transport_nodes[ i ]-depth > 2.
-
-        wa_module-tla = lt_transport_nodes[ i ]-value. " tla nametag
-        wa_module-atransport = lt_transport_nodes[ i + 2 ]-value. " transport name
-        wa_module-is_core = lt_transport_nodes[ i + 6 ]-value. " is core
-        wa_module-avers = lt_transport_nodes[ 4 ]-value. " version
-        INSERT wa_module INTO TABLE lts_abapsdk_avail_modules.
-        i = i + 7.
-      ELSEIF i < 16.
-        i = i + 1.
-        CONTINUE.
-      ELSE.
-        j = i.
-        EXIT.
-      ENDIF.
-
-    ENDLOOP.
-
-
-    LOOP AT lts_abapsdk_avail_modules INTO wa_module.
-
-      IF wa_module-tla = 'core'.
-        wa_module-name = 'AWS SDK for SAP ABAP core [s3, smr, rla, sts]' ##NO_TEXT.
-      ENDIF.
-
-      DATA(j_offset) = 0.
-      WHILE j_offset < lines( lt_transport_nodes ) - j.
-        IF lt_transport_nodes[ j + j_offset ]-value = wa_module-tla.
-          wa_module-name = lt_transport_nodes[ j_offset + j + 2 ]-value.
+        ELSE.
+          j = i.
           EXIT.
         ENDIF.
-        j_offset = j_offset + 1.
+
+      ENDLOOP.
+
+
+      LOOP AT lts_abapsdk_avail_modules INTO wa_module.
+
+        IF wa_module-tla = 'core'.
+          wa_module-name = 'AWS SDK for SAP ABAP core [s3, smr, rla, sts]' ##NO_TEXT.
+        ENDIF.
+
+        DATA(j_offset) = 0.
+        WHILE j_offset < lines( lt_transport_nodes ) - j.
+          IF lt_transport_nodes[ j + j_offset ]-value = wa_module-tla.
+            wa_module-name = lt_transport_nodes[ j_offset + j + 2 ]-value.
+            EXIT.
+          ENDIF.
+          j_offset = j_offset + 1.
+        ENDWHILE.
+
+        MODIFY lts_abapsdk_avail_modules FROM wa_module TRANSPORTING tla name.
+
+      ENDLOOP.
+
+
+      k = j + j_offset + 8.
+      DATA(k_offset) = 0.
+
+      WHILE k_offset <= lines( lt_transport_nodes ) - k.
+        IF line_exists( lts_abapsdk_avail_modules[ tla = lt_transport_nodes[ k + k_offset ]-value ] ).
+          lts_abapsdk_avail_modules[ tla = lt_transport_nodes[ k + k_offset ]-value ]-is_popular = abap_true .
+        ENDIF.
+        k_offset = k_offset + 1.
       ENDWHILE.
 
-      MODIFY lts_abapsdk_avail_modules FROM wa_module TRANSPORTING tla name.
-
-    ENDLOOP.
 
 
-    k = j + j_offset + 8.
-    DATA(k_offset) = 0.
+      r_available_modules = lts_abapsdk_avail_modules.
 
-    WHILE k_offset <= lines( lt_transport_nodes ) - k.
-      IF line_exists( lts_abapsdk_avail_modules[ tla = lt_transport_nodes[ k + k_offset ]-value ] ).
-        lts_abapsdk_avail_modules[ tla = lt_transport_nodes[ k + k_offset ]-value ]-is_popular = abap_true .
-      ENDIF.
-      k_offset = k_offset + 1.
-    ENDWHILE.
+    ENDMETHOD.
 
+    METHOD get_abapsdk_transport_cofile.
 
+      DATA l_cofile_zip_path TYPE string.
+      DATA l_cofile_name TYPE string.
+      DATA l_cofile_blob TYPE xstring.
 
-    r_available_modules = lts_abapsdk_avail_modules.
+      e_cofile_name = 'K' && i_transport+4 && '.' && i_transport+0(3).
 
-  ENDMETHOD.
+      l_cofile_zip_path = m_transports_zip_path && i_tla && '/' && e_cofile_name.
 
-  METHOD get_abapsdk_transport_cofile.
+      e_cofile_blob = get_file_from_zip( i_zipfile_absolute_path = mt_abapsdk_zipfiles[ op = i_operation version = i_version ]-path
+                                         i_file_to_retrieve      = l_cofile_zip_path ).
 
-    DATA l_cofile_zip_path TYPE string.
-    DATA l_cofile_name TYPE string.
-    DATA l_cofile_blob TYPE xstring.
-
-    e_cofile_name = 'K' && i_transport+4 && '.' && i_transport+0(3).
-
-    l_cofile_zip_path = m_transports_zip_path && i_tla && '/' && e_cofile_name.
-
-    e_cofile_blob = get_file_from_zip( i_zipfile_absolute_path = mt_abapsdk_zipfiles[ op = i_operation version = i_version ]-path
-                                       i_file_to_retrieve      = l_cofile_zip_path ).
-
-  ENDMETHOD.
+    ENDMETHOD.
 
 
-  METHOD get_abapsdk_transport_datafile.
+    METHOD get_abapsdk_transport_datafile.
 
-    DATA l_datafile_zip_path TYPE string.
-    DATA l_datafile_name TYPE string.
-    DATA l_datafile_blob TYPE xstring.
-
-
-    e_datafile_name = 'R' && i_transport+4 && '.' && i_transport+0(3).
-
-    l_datafile_zip_path = m_transports_zip_path && i_tla && '/' && e_datafile_name.
-
-    e_datafile_blob = get_file_from_zip( i_zipfile_absolute_path = mt_abapsdk_zipfiles[ op = i_operation version = i_version ]-path
-                                         i_file_to_retrieve      = l_datafile_zip_path ).
+      DATA l_datafile_zip_path TYPE string.
+      DATA l_datafile_name TYPE string.
+      DATA l_datafile_blob TYPE xstring.
 
 
-  ENDMETHOD.
+      e_datafile_name = 'R' && i_transport+4 && '.' && i_transport+0(3).
 
-  METHOD write_abapsdk_transport_trdir.
+      l_datafile_zip_path = m_transports_zip_path && i_tla && '/' && e_datafile_name.
 
-    DATA lv_rc TYPE i.
-    DATA lv_validation_active TYPE abap_bool.
-    DATA lv_filepath_cofile TYPE string.
-    DATA lv_filepath_datafile TYPE string.
-    DATA gv_file_name(255) TYPE c.
+      e_datafile_blob = get_file_from_zip( i_zipfile_absolute_path = mt_abapsdk_zipfiles[ op = i_operation version = i_version ]-path
+                                           i_file_to_retrieve      = l_datafile_zip_path ).
+
+
+    ENDMETHOD.
+
+    METHOD write_abapsdk_transport_trdir.
+
+      DATA lv_rc TYPE i.
+      DATA lv_validation_active TYPE abap_bool.
+      DATA lv_filepath_cofile TYPE string.
+      DATA lv_filepath_datafile TYPE string.
+      DATA gv_file_name(255) TYPE c.
 
 
 
-    CALL FUNCTION 'FILE_GET_NAME_USING_PATH'
-      EXPORTING
-        client                     = sy-mandt
-        logical_path               = c_trans_logical_path
-        operating_system           = sy-opsys
-        parameter_1                = 'cofiles'
-        file_name                  = i_cofile_name
-      IMPORTING
-        file_name_with_path        = lv_filepath_cofile
-      EXCEPTIONS
-        path_not_found             = 1
-        missing_parameter          = 2
-        operating_system_not_found = 3
-        file_system_not_found      = 4
-        OTHERS                     = 5.
-    IF sy-subrc <> 0.
-      raise_lpath_exception( lv_filepath_cofile ).
-    ENDIF.
-
-
-    CALL FUNCTION 'FILE_VALIDATE_NAME'
-      EXPORTING
-        logical_filename  = c_logsubdir_name
-        parameter_1       = 'cofiles'
-      CHANGING
-        physical_filename = lv_filepath_cofile
-      EXCEPTIONS
-        OTHERS            = 1.
-    IF sy-subrc <> 0.
-      MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
-        WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
-    ENDIF.
-
-
-
-    CALL FUNCTION 'FILE_GET_NAME_USING_PATH'
-      EXPORTING
-        client                     = sy-mandt
-        logical_path               = c_trans_logical_path
-        operating_system           = sy-opsys
-        parameter_1                = 'data'
-        file_name                  = i_datafile_name
-      IMPORTING
-        file_name_with_path        = lv_filepath_datafile
-      EXCEPTIONS
-        path_not_found             = 1
-        missing_parameter          = 2
-        operating_system_not_found = 3
-        file_system_not_found      = 4
-        OTHERS                     = 5.
-    IF sy-subrc <> 0.
-      raise_lpath_exception( i_datafile_name ).
-    ENDIF.
-
-    CALL FUNCTION 'FILE_VALIDATE_NAME'
-      EXPORTING
-        logical_filename  = c_logsubdir_name
-        parameter_1       = 'data'
-      CHANGING
-        physical_filename = lv_filepath_datafile
-      EXCEPTIONS
-        OTHERS            = 1.
-    IF sy-subrc <> 0.
-      MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
-        WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
-    ENDIF.
-
-
-    TRY.
-        open_for_output( lv_filepath_cofile ).
-        TRANSFER i_cofile_blob TO lv_filepath_cofile.
-        CLOSE DATASET lv_filepath_cofile.
-
-        open_for_output( lv_filepath_datafile ).
-        TRANSFER i_datafile_blob TO lv_filepath_datafile.
-        CLOSE DATASET lv_filepath_datafile.
-      CATCH cx_sy_file_authority INTO DATA(r_ex1).
-        MESSAGE r_ex1->get_text( ) TYPE 'I' DISPLAY LIKE 'E'.
-        RETURN.
-      CATCH cx_sy_file_access_error INTO DATA(r_ex2).
-        MESSAGE r_ex2->get_text( ) TYPE 'I' DISPLAY LIKE 'E'.
-        RETURN.
-      CATCH cx_root INTO DATA(r_ex).
-        MESSAGE r_ex->get_text( ) TYPE 'I' DISPLAY LIKE 'E'.
-        RETURN.
-    ENDTRY.
-
-    r_success = abap_true.
-
-  ENDMETHOD.
-
-  METHOD raise_lpath_exception.
-    RAISE EXCEPTION TYPE lcx_error
-      EXPORTING
-        iv_msg = |Could not determine location to save { iv_filename }. | &&
-                 |Please maintain logical path { c_trans_logical_path } in transaction FILE | &&
-                 |to point to physical path <P=DIR_TRANS>/<PARAM_1>/<FILENAME>| ##NO_TEXT.
-
-  ENDMETHOD.
-
-  METHOD import_abapsdk_transports.
-
-    DATA: l_system TYPE tmssysnam.
-    DATA: l_tp_ret_code TYPE stpa-retcode.
-    DATA: ls_exception TYPE stmscalert.
-
-    l_system = get_system_name( ).
-
-    " TODO: Needs to go into its own method
-    CALL FUNCTION 'TMS_MGR_FORWARD_TR_REQUEST'
-      EXPORTING
-        iv_request                 = 'SOME'
-        iv_tarcli                  = sy-mandt
-        iv_import_again            = abap_true
-        iv_target                  = l_system
-        it_requests                = it_transport_names
-      IMPORTING
-        ev_tp_ret_code             = l_tp_ret_code
-        es_exception               = ls_exception
-      EXCEPTIONS
-        read_config_failed         = 1
-        table_of_requests_is_empty = 2
-        OTHERS                     = 3.
-    CASE sy-subrc.
-      WHEN 0. " all good
-      WHEN 2. " empty import list
-      WHEN 4. " finished with warnings
-      WHEN OTHERS.
-        MESSAGE |Error forwarding requests to { l_system }| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-    ENDCASE.
-
-    " TODO: DO SOMETHING USEFUL WITH THESE.
-    CLEAR: l_tp_ret_code.
-    CLEAR: ls_exception.
-
-* WARNING: Turning off offline processing (IV_OFFLINE = abap_false) makes the
-* FM call spawn a new logon session for every transport, which can lead to resource
-* exhaustion for very large module import numbers (> 200), check also SAP Profile
-* parameters rdisp/user_resource_limit and rdisp/tm_max_no
-* ADD: Turning on offline processing (IV_OFFLINE = abap_true) apparently leads to the
-* background job finishing prematurely, which is not desired.
-
-    IF sy-batch = abap_true.
-      CALL FUNCTION 'TMS_MGR_IMPORT_TR_REQUEST'
+      CALL FUNCTION 'FILE_GET_NAME_USING_PATH'
         EXPORTING
-          iv_system                  = l_system
-          iv_request                 = 'SOME'
-          iv_client                  = sy-mandt
-          iv_import_again            = abap_true
-          iv_ignore_cvers            = abap_true
-          iv_offline                 = abap_false
-          iv_monitor                 = abap_false
-          it_requests                = it_transport_names
+          client                     = sy-mandt
+          logical_path               = c_trans_logical_path
+          operating_system           = sy-opsys
+          parameter_1                = 'cofiles'
+          file_name                  = i_cofile_name
         IMPORTING
-          ev_tp_ret_code             = l_tp_ret_code
-          es_exception               = ls_exception
+          file_name_with_path        = lv_filepath_cofile
         EXCEPTIONS
-          read_config_failed         = 1
-          table_of_requests_is_empty = 2
-          OTHERS                     = 3.
-      CASE sy-subrc.
-        WHEN 0. " all good
-        WHEN 2. " empty import list
-        WHEN 4. " finished with warnings
-          WHEN OTHERS: .
-          MESSAGE |Error importing requests to { l_system }| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-      ENDCASE.
-    ELSE.
-      CALL FUNCTION 'TMS_MGR_IMPORT_TR_REQUEST'
+          path_not_found             = 1
+          missing_parameter          = 2
+          operating_system_not_found = 3
+          file_system_not_found      = 4
+          OTHERS                     = 5.
+      IF sy-subrc <> 0.
+        raise_lpath_exception( lv_filepath_cofile ).
+      ENDIF.
+
+
+      CALL FUNCTION 'FILE_VALIDATE_NAME'
         EXPORTING
-          iv_system                  = l_system
+          logical_filename  = c_logsubdir_name
+          parameter_1       = 'cofiles'
+        CHANGING
+          physical_filename = lv_filepath_cofile
+        EXCEPTIONS
+          OTHERS            = 1.
+      IF sy-subrc <> 0.
+        MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+          WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+      ENDIF.
+
+
+
+      CALL FUNCTION 'FILE_GET_NAME_USING_PATH'
+        EXPORTING
+          client                     = sy-mandt
+          logical_path               = c_trans_logical_path
+          operating_system           = sy-opsys
+          parameter_1                = 'data'
+          file_name                  = i_datafile_name
+        IMPORTING
+          file_name_with_path        = lv_filepath_datafile
+        EXCEPTIONS
+          path_not_found             = 1
+          missing_parameter          = 2
+          operating_system_not_found = 3
+          file_system_not_found      = 4
+          OTHERS                     = 5.
+      IF sy-subrc <> 0.
+        raise_lpath_exception( i_datafile_name ).
+      ENDIF.
+
+      CALL FUNCTION 'FILE_VALIDATE_NAME'
+        EXPORTING
+          logical_filename  = c_logsubdir_name
+          parameter_1       = 'data'
+        CHANGING
+          physical_filename = lv_filepath_datafile
+        EXCEPTIONS
+          OTHERS            = 1.
+      IF sy-subrc <> 0.
+        MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+          WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+      ENDIF.
+
+
+      TRY.
+          open_for_output( lv_filepath_cofile ).
+          TRANSFER i_cofile_blob TO lv_filepath_cofile.
+          CLOSE DATASET lv_filepath_cofile.
+
+          open_for_output( lv_filepath_datafile ).
+          TRANSFER i_datafile_blob TO lv_filepath_datafile.
+          CLOSE DATASET lv_filepath_datafile.
+        CATCH cx_sy_file_authority INTO DATA(r_ex1).
+          MESSAGE r_ex1->get_text( ) TYPE 'I' DISPLAY LIKE 'E'.
+          RETURN.
+        CATCH cx_sy_file_access_error INTO DATA(r_ex2).
+          MESSAGE r_ex2->get_text( ) TYPE 'I' DISPLAY LIKE 'E'.
+          RETURN.
+        CATCH cx_root INTO DATA(r_ex).
+          MESSAGE r_ex->get_text( ) TYPE 'I' DISPLAY LIKE 'E'.
+          RETURN.
+      ENDTRY.
+
+      r_success = abap_true.
+
+    ENDMETHOD.
+
+    METHOD raise_lpath_exception.
+      RAISE EXCEPTION TYPE lcx_error
+        EXPORTING
+          iv_msg = |Could not determine location to save { iv_filename }. | &&
+                   |Please maintain logical path { c_trans_logical_path } in transaction FILE | &&
+                   |to point to physical path <P=DIR_TRANS>/<PARAM_1>/<FILENAME>| ##NO_TEXT.
+
+    ENDMETHOD.
+
+    METHOD import_abapsdk_transports.
+
+      DATA: l_system TYPE tmssysnam.
+      DATA: l_tp_ret_code TYPE stpa-retcode.
+      DATA: ls_exception TYPE stmscalert.
+
+      l_system = get_system_name( ).
+
+      " TODO: Needs to go into its own method
+      CALL FUNCTION 'TMS_MGR_FORWARD_TR_REQUEST'
+        EXPORTING
           iv_request                 = 'SOME'
-          iv_client                  = sy-mandt
+          iv_tarcli                  = sy-mandt
           iv_import_again            = abap_true
-          iv_ignore_cvers            = abap_true
-          iv_offline                 = abap_false
-          iv_monitor                 = abap_true
+          iv_target                  = l_system
           it_requests                = it_transport_names
         IMPORTING
           ev_tp_ret_code             = l_tp_ret_code
@@ -1380,900 +1343,962 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
         WHEN 2. " empty import list
         WHEN 4. " finished with warnings
         WHEN OTHERS.
-          MESSAGE |Error importing requests to { l_system }| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
+          MESSAGE |Error forwarding requests to { l_system }| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
       ENDCASE.
-    ENDIF.
 
-    e_tp_retcode = l_tp_ret_code.
-    es_exception = ls_exception.
+      " TODO: DO SOMETHING USEFUL WITH THESE.
+      CLEAR: l_tp_ret_code.
+      CLEAR: ls_exception.
 
+* WARNING: Turning off offline processing (IV_OFFLINE = abap_false) makes the
+* FM call spawn a new logon session for every transport, which can lead to resource
+* exhaustion for very large module import numbers (> 200), check also SAP Profile
+* parameters rdisp/user_resource_limit and rdisp/tm_max_no
+* ADD: Turning on offline processing (IV_OFFLINE = abap_true) apparently leads to the
+* background job finishing prematurely, which is not desired.
 
-  ENDMETHOD.
-
-  "check if at least one client in the system has role "Production"
-  METHOD has_prod_client.
-
-    SELECT cccategory INTO TABLE @DATA(it_t000) FROM t000 AS t.
-    IF sy-subrc <> 0.
-      MESSAGE |Could not read client category from T000| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-    ENDIF.
-
-    IF line_exists( it_t000[ cccategory = 'P' ] ).
-      r_result = abap_true.
-    ELSE.
-      r_result = abap_false.
-    ENDIF.
-
-  ENDMETHOD.
-
-
-  METHOD get_client_role.
-    SELECT SINGLE cccategory INTO @r_result FROM t000 AS t WHERE t~mandt = @i_client.
-    IF sy-subrc <> 0.
-      MESSAGE |Could not read client role from T000| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-    ENDIF.
-
-  ENDMETHOD.
-
-  METHOD get_running_jobs.
-    " --- Job already running?
-    CALL FUNCTION 'BP_FIND_JOBS_WITH_PROGRAM'
-      EXPORTING
-        abap_program_name             = i_jobname
-        status                        = 'R'  " Batch job already running in background?
-      TABLES
-        joblist                       = r_result
-      EXCEPTIONS
-        no_jobs_found                 = 1
-        program_specification_missing = 2
-        invalid_dialog_type           = 3
-        job_find_canceled             = 4
-        OTHERS                        = 5.
-    IF sy-subrc <> 0.
-* Implement suitable error handling here
-    ENDIF.
-  ENDMETHOD.
-
-
-  METHOD get_system_name.
-
-    CALL FUNCTION 'GET_SYSTEM_NAME'
-      IMPORTING
-        system_name = r_sysnam.
-
-  ENDMETHOD.
-
-  METHOD is_job_running.
-
-    DATA lt_joblist TYPE TABLE OF tbtcjob.
-    lt_joblist = get_running_jobs( i_jobname = sy-repid ).
-
-    IF lines( lt_joblist ) > 0.
-      r_result = abap_true.
-    ELSE.
-      r_result = abap_false.
-    ENDIF.
-
-  ENDMETHOD.
-
-
-
-
-  METHOD check_file_writable_at.
-    TRY.
-        open_for_output( i_path ).
-        CLOSE DATASET i_path.
-        r_result = abap_true.
-      CATCH lcx_error INTO DATA(lo_ex).
-        MESSAGE |Path { i_path } not writable, reason: { lo_ex->av_msg }| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-    ENDTRY.
-  ENDMETHOD.
-
-
-  METHOD check_file_exists_at.
-
-    DATA(lv_path) = CONV pfebackuppro( i_path ).
-    CALL FUNCTION 'PFL_CHECK_OS_FILE_EXISTENCE'
-      EXPORTING
-        long_filename         = lv_path
-      IMPORTING
-        file_exists           = r_result
-      EXCEPTIONS
-        authorization_missing = 1
-        OTHERS                = 2.
-
-    CASE sy-subrc.
-      WHEN 0.
-        " all good
-      WHEN 1.
-        RAISE EXCEPTION TYPE cx_sy_file_authority.
-      WHEN 2.
-        RAISE EXCEPTION TYPE cx_sy_file_io. " TODO: Find/Create more appropriate exception for generic case
-    ENDCASE.
-
-  ENDMETHOD.
-
-  METHOD update_abapsdk_zipfile_paths.
-
-    DATA(lv_exists) = abap_false.
-
-    LOOP AT mt_abapsdk_zipfiles INTO DATA(wa_abapsdk_zipfile).
-
-      lv_exists = check_file_exists_at( i_path = wa_abapsdk_zipfile-path ).
-
-      IF lv_exists = abap_true.
-        CONTINUE.
+      IF sy-batch = abap_true.
+        CALL FUNCTION 'TMS_MGR_IMPORT_TR_REQUEST'
+          EXPORTING
+            iv_system                  = l_system
+            iv_request                 = 'SOME'
+            iv_client                  = sy-mandt
+            iv_import_again            = abap_true
+            iv_ignore_cvers            = abap_true
+            iv_offline                 = abap_false
+            iv_monitor                 = abap_false
+            it_requests                = it_transport_names
+          IMPORTING
+            ev_tp_ret_code             = l_tp_ret_code
+            es_exception               = ls_exception
+          EXCEPTIONS
+            read_config_failed         = 1
+            table_of_requests_is_empty = 2
+            OTHERS                     = 3.
+        CASE sy-subrc.
+          WHEN 0. " all good
+          WHEN 2. " empty import list
+          WHEN 4. " finished with warnings
+            WHEN OTHERS: .
+            MESSAGE |Error importing requests to { l_system }| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
+        ENDCASE.
       ELSE.
-        wa_abapsdk_zipfile-path = ''.
-        MODIFY TABLE mt_abapsdk_zipfiles FROM wa_abapsdk_zipfile.
+        CALL FUNCTION 'TMS_MGR_IMPORT_TR_REQUEST'
+          EXPORTING
+            iv_system                  = l_system
+            iv_request                 = 'SOME'
+            iv_client                  = sy-mandt
+            iv_import_again            = abap_true
+            iv_ignore_cvers            = abap_true
+            iv_offline                 = abap_false
+            iv_monitor                 = abap_true
+            it_requests                = it_transport_names
+          IMPORTING
+            ev_tp_ret_code             = l_tp_ret_code
+            es_exception               = ls_exception
+          EXCEPTIONS
+            read_config_failed         = 1
+            table_of_requests_is_empty = 2
+            OTHERS                     = 3.
+        CASE sy-subrc.
+          WHEN 0. " all good
+          WHEN 2. " empty import list
+          WHEN 4. " finished with warnings
+          WHEN OTHERS.
+            MESSAGE |Error importing requests to { l_system }| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
+        ENDCASE.
       ENDIF.
 
-    ENDLOOP.
-  ENDMETHOD.
+      e_tp_retcode = l_tp_ret_code.
+      es_exception = ls_exception.
 
 
-  METHOD check_abapsdk_zipfile_exists.
+    ENDMETHOD.
 
-    IF line_exists( mt_abapsdk_zipfiles[ op = i_operation version = i_version ] ).
-      r_result = check_file_exists_at( mt_abapsdk_zipfiles[ op = i_operation version = i_version ]-path ).
-    ELSE.
-      r_result = abap_false.
-    ENDIF.
+    "check if at least one client in the system has role "Production"
+    METHOD has_prod_client.
 
-  ENDMETHOD.
-
-
-  METHOD has_internet_access.
-
-    DATA lv_result TYPE abap_bool.
-    DATA lr_http_client TYPE REF TO if_http_client.
-    DATA lv_reason TYPE string.
-    DATA lv_url TYPE string.
-    DATA lv_http_rc TYPE i.
-    DATA lv_status_text TYPE string.
-
-    lv_result = abap_false.
-
-    lv_url = 'http://ocsp.r2m02.amazontrust.com'.
-
-    TRY.
-        cl_http_client=>create_by_url( EXPORTING url = lv_url IMPORTING client = lr_http_client ).
-
-        lr_http_client->request->set_method( if_http_request=>co_request_method_get ).
-
-        lr_http_client->send( timeout = if_http_client=>co_timeout_default ).
-
-        lr_http_client->receive( EXCEPTIONS http_communication_failure = 1
-                                            http_invalid_state         = 2
-                                            http_processing_failed     = 3
-                                            OTHERS                     = 4 ).
-
+      SELECT cccategory INTO TABLE @DATA(it_t000) FROM t000 AS t.
         IF sy-subrc <> 0.
-          lv_result = abap_false.
-        ELSE.
-          lv_result = abap_true.
+          MESSAGE |Could not read client category from T000| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
         ENDIF.
 
-      CATCH cx_root INTO DATA(r_ex).
-        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = r_ex->get_text( ).
-    ENDTRY.
-
-    r_result = lv_result.
-
-  ENDMETHOD.
-
-
-  METHOD run_foreground.
-
-    DATA: l_tp_ret_code_inst TYPE stpa-retcode.
-    DATA: ls_exception_inst TYPE stmscalert.
-
-    DATA: l_tp_ret_code_uninst TYPE stpa-retcode.
-    DATA: ls_exception_uninst TYPE stmscalert.
-
-    DATA(lt_modules_to_be_installed) = i_modules_to_be_installed.
-    DATA(lt_modules_to_be_deleted) = i_modules_to_be_deleted.
-
-    DATA lt_transport_list_inst TYPE stms_tr_requests.
-    DATA lt_transport_list_uninst TYPE stms_tr_requests.
-
-    DATA lt_avail_modules_inst TYPE tt_abapsdk_module.
-    lt_avail_modules_inst = get_abapsdk_avail_modules_json(
-      i_operation = 'install'
-      i_source    = 'zip'
-      i_version   = i_target_version
-    ).
-
-    LOOP AT lt_modules_to_be_installed ASSIGNING FIELD-SYMBOL(<fs_module_to_be_installed>).
-
-      get_abapsdk_transport_cofile(
-        EXPORTING
-          i_tla         = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla
-          i_transport   = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
-          i_operation   = 'install'
-          i_version     = i_target_version
-        IMPORTING
-          e_cofile_name = DATA(l_cofile_name)
-          e_cofile_blob = DATA(l_cofile_blob) ).
-
-
-      get_abapsdk_transport_datafile(
-        EXPORTING
-          i_tla           = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla
-          i_transport     = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
-          i_operation     = 'install'
-          i_version       = i_target_version
-        IMPORTING
-          e_datafile_name = DATA(l_datafile_name)
-          e_datafile_blob = DATA(l_datafile_blob) ).
-
-
-      DATA(l_success_write) = write_abapsdk_transport_trdir(
-        i_cofile_name   = l_cofile_name
-        i_datafile_name = l_datafile_name
-        i_cofile_blob   = l_cofile_blob
-        i_datafile_blob = l_datafile_blob ).
-
-      INSERT VALUE stms_tr_request(
-      trkorr = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
-      tarcli = sy-mandt
-      ) INTO TABLE lt_transport_list_inst.
-
-    ENDLOOP.
-
-    CALL METHOD import_abapsdk_transports
-      EXPORTING
-        it_transport_names = lt_transport_list_inst
-      IMPORTING
-        e_tp_retcode       = l_tp_ret_code_inst
-        es_exception       = ls_exception_inst.
-
-    e_tp_rc_inst = l_tp_ret_code_inst.
-    es_exception_inst = ls_exception_inst.
-
-
-
-
-
-    LOOP AT lt_modules_to_be_deleted ASSIGNING FIELD-SYMBOL(<fs_module_to_be_deleted>).
-
-      DATA lt_avail_modules_uninst TYPE tt_abapsdk_module.
-      lt_avail_modules_uninst = get_abapsdk_avail_modules_json(
-        i_operation = 'uninstall'
-        i_source    = 'zip'
-        i_version   = i_target_version
-      ).
-
-
-      get_abapsdk_transport_cofile(
-        EXPORTING
-          i_tla         = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-tla
-          i_transport   = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
-          i_operation   = 'uninstall'
-          i_version     = i_target_version
-        IMPORTING
-          e_cofile_name = DATA(l_uninstall_cofile_name)
-          e_cofile_blob = DATA(l_uninstall_cofile_blob) ).
-
-
-      get_abapsdk_transport_datafile(
-        EXPORTING
-          i_tla           = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-tla
-          i_transport     = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
-          i_operation     = 'uninstall'
-          i_version       = i_target_version
-        IMPORTING
-          e_datafile_name = DATA(l_uninstall_datafile_name)
-          e_datafile_blob = DATA(l_uninstall_datafile_blob) ).
-
-
-      write_abapsdk_transport_trdir(
-        EXPORTING
-          i_cofile_name   = l_uninstall_cofile_name
-          i_datafile_name = l_uninstall_datafile_name
-          i_cofile_blob   = l_uninstall_cofile_blob
-          i_datafile_blob = l_uninstall_datafile_blob
-        RECEIVING
-          r_success       = DATA(l_uninstall_success_write) ).
-
-
-      INSERT VALUE stms_tr_request(
-      trkorr = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
-      tarcli = sy-mandt
-      ) INTO TABLE lt_transport_list_uninst.
-
-    ENDLOOP.
-
-    CALL METHOD import_abapsdk_transports
-      EXPORTING
-        it_transport_names = lt_transport_list_uninst
-      IMPORTING
-        e_tp_retcode       = l_tp_ret_code_uninst
-        es_exception       = ls_exception_uninst.
-
-    e_tp_rc_uninst = l_tp_ret_code_uninst.
-    es_exception_uninst = ls_exception_uninst.
-
-
-  ENDMETHOD.
-
-
-  METHOD submit_batch_job.
-
-    DATA(lt_modules_to_be_installed) = i_modules_to_be_installed.
-    DATA(lt_modules_to_be_deleted) = i_modules_to_be_deleted.
-    DATA(lv_target_version) = i_target_version.
-
-
-    " Export to shared memory and batch job submission need to go together
-    DELETE FROM SHARED BUFFER indx(mi) ID 'MOD_INST'.
-    EXPORT st_modules_to_be_installed = lt_modules_to_be_installed TO SHARED BUFFER indx(mi) ID 'MOD_INST'.
-    DELETE FROM SHARED BUFFER indx(md) ID 'MOD_DELE'.
-    EXPORT st_modules_to_be_deleted = lt_modules_to_be_deleted TO SHARED BUFFER indx(md) ID 'MOD_DELE'.
-    DELETE FROM SHARED BUFFER indx(tv) ID 'TAR_VERS'.
-    EXPORT s_target_version = lv_target_version TO SHARED BUFFER indx(tv) ID 'TAR_VERS'.
-
-
-    DATA(lo_job) = NEW cl_bp_abap_job( ).
-    lo_job->set_name( CONV char32( sy-repid ) ).
-    lo_job->set_report( sy-repid ).
-    lo_job->if_bp_job_engine~generate_job_count(
-      EXCEPTIONS
-        cant_create_job  = 1
-        invalid_job_data = 2
-        jobname_missing  = 3 ).
-    IF sy-subrc = 0.
-      lo_job->if_bp_job_engine~plan_job_step(
-        EXCEPTIONS
-          bad_priparams           = 11
-          bad_xpgflags            = 12
-          invalid_jobdata         = 13
-          jobname_missing         = 14
-          job_notex               = 15
-          job_submit_failed       = 16
-          program_missing         = 17
-          prog_abap_and_extpg_set = 18 ).
-    ENDIF.
-    IF sy-subrc = 0.
-      lo_job->if_bp_job_engine~start_immediately( EXCEPTIONS cant_start_immediate = 21 invalid_startdate = 22 jobname_missing = 23 job_close_failed = 24 job_nosteps = 25 job_notex = 26 ).
-    ENDIF.
-
-    IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Failed to submit job { sy-repid }: subrc = { sy-subrc }| ##NO_TEXT.
-    ENDIF.
-
-    r_result = lo_job->jobcount.
-
-  ENDMETHOD.
-
-
-  METHOD run_background.
-
-    DATA: l_tp_rc_inst TYPE stpa-retcode.
-    DATA: ls_exception_inst TYPE stmscalert.
-    DATA: l_tp_rc_uninst TYPE stpa-retcode.
-    DATA: ls_exception_uninst TYPE stmscalert.
-
-
-    DATA: st_modules_to_be_installed TYPE tt_abapsdk_tla.
-    DATA: st_modules_to_be_deleted TYPE tt_abapsdk_tla.
-    DATA: s_target_version TYPE string.
-
-    DATA: lt_transport_list_inst TYPE stms_tr_requests.
-    DATA: lt_transport_list_uninst TYPE stms_tr_requests.
-    DATA: lt_abapsdk_zipfiles TYPE tt_abapsdk_zip.
-    DATA: wa_zipfile_inst TYPE ts_abapsdk_zip.
-
-    IMPORT st_modules_to_be_installed = st_modules_to_be_installed FROM SHARED BUFFER indx(mi) ID 'MOD_INST'.
-    IMPORT st_modules_to_be_deleted = st_modules_to_be_deleted FROM SHARED BUFFER indx(md) ID 'MOD_DELE'.
-    IMPORT s_target_version = s_target_version FROM SHARED BUFFER indx(tv) ID 'TAR_VERS'.
-
-
-    IF check_abapsdk_zipfile_exists( i_operation = 'install'
-                                     i_version = s_target_version ) = abap_false.
-
-
-      wa_zipfile_inst-op = 'install' ##NO_TEXT.
-      wa_zipfile_inst-version = s_target_version.
-
-      DATA(lv_zipfile_name_inst) = build_zipfile_name( i_operation = wa_zipfile_inst-op i_version = s_target_version ).
-
-      wa_zipfile_inst-uri = |{ build_download_uri_prefix( ) }{ lv_zipfile_name_inst }|.
-
-      wa_zipfile_inst-json_web = |{ build_download_uri_prefix( ) }{ build_jsonfile_name( i_operation = wa_zipfile_inst-op i_version = s_target_version ) }|.
-
-      wa_zipfile_inst-path = build_zipfile_path( i_zipfile_name       = lv_zipfile_name_inst
-                                                 i_trans_logical_path = c_trans_logical_path ).
-
-      validate_zipfile_path( i_zipfile_path   = wa_zipfile_inst-path
-                             i_logsubdir_name = c_logsubdir_name ).
-
-      APPEND wa_zipfile_inst TO mt_abapsdk_zipfiles.  " save for later
-      APPEND wa_zipfile_inst TO lt_abapsdk_zipfiles.  " save for now
-
-    ELSE.
-      wa_zipfile_inst = mt_abapsdk_zipfiles[ op = 'install' version = s_target_version ].
-      APPEND wa_zipfile_inst TO lt_abapsdk_zipfiles.  " save for now
-    ENDIF.
-
-    IF check_file_exists_at( lt_abapsdk_zipfiles[ op = 'install' version = s_target_version ]-path ) = abap_false.
-      download_abapsdk_zipfiles( i_file_list = lt_abapsdk_zipfiles
-                                 i_version   = s_target_version ).
-    ENDIF.
-
-
-    IF check_abapsdk_zipfile_exists( i_operation = 'uninstall'
-                                     i_version = s_target_version ) = abap_false.
-      DATA wa_zipfile_uninst TYPE ts_abapsdk_zip.
-      wa_zipfile_uninst-op = 'uninstall' ##NO_TEXT.
-      wa_zipfile_uninst-version = s_target_version.
-
-      DATA(lv_zipfile_name_uninst) = build_zipfile_name( i_operation = wa_zipfile_uninst-op
-                                                         i_version   = s_target_version ).
-
-      wa_zipfile_uninst-uri = |{ build_download_uri_prefix( ) }{ lv_zipfile_name_uninst }|.
-
-      wa_zipfile_uninst-json_web = |{ build_download_uri_prefix( ) }{ build_jsonfile_name( i_operation = wa_zipfile_uninst-op i_version = s_target_version ) }|.
-
-      wa_zipfile_uninst-path = build_zipfile_path( i_zipfile_name       = lv_zipfile_name_uninst
-                                                   i_trans_logical_path = c_trans_logical_path ).
-
-      validate_zipfile_path( i_zipfile_path   = wa_zipfile_uninst-path
-                             i_logsubdir_name = c_logsubdir_name ).
-
-      APPEND wa_zipfile_uninst TO mt_abapsdk_zipfiles.
-      APPEND wa_zipfile_uninst TO lt_abapsdk_zipfiles.
-
-    ELSE.
-      wa_zipfile_uninst = mt_abapsdk_zipfiles[ op = 'uninstall' version = s_target_version ].
-      APPEND wa_zipfile_uninst TO lt_abapsdk_zipfiles.  " save for now
-    ENDIF.
-
-    IF check_file_exists_at( lt_abapsdk_zipfiles[ op = 'uninstall' version = s_target_version ]-path ) = abap_false.
-      download_abapsdk_zipfiles( i_file_list = lt_abapsdk_zipfiles
-                                 i_version   = s_target_version ).
-    ENDIF.
-
-
-    WRITE / |In background mode| ##NO_TEXT.
-    WRITE /.
-
-    WRITE /.
-    WRITE / |Modules to be installed (transport file { wa_zipfile_inst-path }| ##NO_TEXT.
-    LOOP AT st_modules_to_be_installed ASSIGNING FIELD-SYMBOL(<fs_mod_inst>).
-      WRITE <fs_mod_inst>-tla && | |.
-    ENDLOOP.
-
-    WRITE /.
-    WRITE / |to be deleted (transport file { wa_zipfile_uninst-path }| ##NO_TEXT.
-    LOOP AT st_modules_to_be_deleted ASSIGNING FIELD-SYMBOL(<fs_mod_dele>).
-      WRITE / <fs_mod_dele>-tla && | |.
-    ENDLOOP.
-
-    DATA lt_avail_modules_inst TYPE tt_abapsdk_module.
-    lt_avail_modules_inst = get_abapsdk_avail_modules_json(
-      i_operation = wa_zipfile_inst-op
-      i_source    = 'zip'
-      i_version   = wa_zipfile_inst-version
-    ).
-
-    LOOP AT st_modules_to_be_installed ASSIGNING FIELD-SYMBOL(<fs_module_to_be_installed>).
-      get_abapsdk_transport_cofile(
-        EXPORTING
-          i_tla         = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla
-          i_transport   = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
-          i_operation   = 'install'
-          i_version     = s_target_version
-        IMPORTING
-          e_cofile_name = DATA(l_cofile_name)
-          e_cofile_blob = DATA(l_cofile_blob) ).
-
-      WRITE / |Downloaded cofile | && lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport &&
-               | for TLA | && lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla ##NO_TEXT.
-
-      get_abapsdk_transport_datafile(
-        EXPORTING
-          i_tla           = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla
-          i_transport     = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
-          i_operation     = 'install'
-          i_version       = s_target_version
-        IMPORTING
-          e_datafile_name = DATA(l_datafile_name)
-          e_datafile_blob = DATA(l_datafile_blob) ).
-
-      WRITE / |Downloaded data file | && lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport &&
-               | for TLA | && lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla ##NO_TEXT.
-
-      write_abapsdk_transport_trdir(
-        EXPORTING
-          i_cofile_name   = l_cofile_name
-          i_datafile_name = l_datafile_name
-          i_cofile_blob   = l_cofile_blob
-          i_datafile_blob = l_datafile_blob
-        RECEIVING
-          r_success       = DATA(l_success_write) ).
-
-      WRITE / |Wrote cofile and datafile for transport | && lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport &&
-               | for TLA | && lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla && | successfully? -> | && l_success_write ##NO_TEXT.
-
-
-      INSERT VALUE stms_tr_request( trkorr = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport ) INTO TABLE lt_transport_list_inst.
-    ENDLOOP.
-
-
-    CALL METHOD import_abapsdk_transports
-      EXPORTING
-        it_transport_names = lt_transport_list_inst
-      IMPORTING
-        e_tp_retcode       = l_tp_rc_inst
-        es_exception       = ls_exception_inst.
-
-    WRITE / |Imported installation transport with tp return code: | && l_tp_rc_inst && |, message was: | && ls_exception_inst-error ##NO_TEXT.
-
-
-    DATA lt_avail_modules_uninst TYPE tt_abapsdk_module.
-    lt_avail_modules_uninst = get_abapsdk_avail_modules_json(
-      i_operation = wa_zipfile_uninst-op
-      i_source    = 'zip'
-      i_version   = wa_zipfile_uninst-version
-    ).
-
-
-    LOOP AT st_modules_to_be_deleted ASSIGNING FIELD-SYMBOL(<fs_module_to_be_deleted>).
-
-
-      get_abapsdk_transport_cofile(
-        EXPORTING
-          i_tla         = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-tla
-          i_transport   = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
-          i_operation   = 'uninstall'
-          i_version     = s_target_version
-        IMPORTING
-          e_cofile_name = DATA(l_uninstall_cofile_name)
-          e_cofile_blob = DATA(l_uninstall_cofile_blob) ).
-
-
-      get_abapsdk_transport_datafile(
-        EXPORTING
-          i_tla           = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-tla
-          i_transport     = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
-          i_operation     = 'uninstall'
-          i_version       = s_target_version
-        IMPORTING
-          e_datafile_name = DATA(l_uninstall_datafile_name)
-          e_datafile_blob = DATA(l_uninstall_datafile_blob) ).
-
-
-      write_abapsdk_transport_trdir(
-        EXPORTING
-          i_cofile_name   = l_uninstall_cofile_name
-          i_datafile_name = l_uninstall_datafile_name
-          i_cofile_blob   = l_uninstall_cofile_blob
-          i_datafile_blob = l_uninstall_datafile_blob
-        RECEIVING
-          r_success       = DATA(l_uninstall_success_write) ).
-
-      INSERT VALUE stms_tr_request( trkorr = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport ) INTO TABLE lt_transport_list_uninst.
-
-    ENDLOOP.
-
-
-    CALL METHOD import_abapsdk_transports
-      EXPORTING
-        it_transport_names = lt_transport_list_uninst
-      IMPORTING
-        e_tp_retcode       = l_tp_rc_uninst
-        es_exception       = ls_exception_uninst.
-
-    WRITE / |Imported uninstallation transports with tp return code: | && l_tp_rc_uninst && |, message was: | && ls_exception_uninst-error ##NO_TEXT.
-
-    DELETE FROM SHARED BUFFER indx(mi) ID 'MOD_INST'.
-    DELETE FROM SHARED BUFFER indx(md) ID 'MOD_DELE'.
-    DELETE FROM SHARED BUFFER indx(tv) ID 'TAR_VERS'.
-
-  ENDMETHOD.
-
-
-  METHOD download_abapsdk_zipfiles.
-    DATA l_dir_tmp_path TYPE text255.
-    DATA lv_result TYPE abap_bool VALUE abap_true.
-    DATA lt_abapsdk_zipfiles TYPE tt_abapsdk_zip.
-    DATA wa_abapsdk_zipfile TYPE ts_abapsdk_zip.
-
-    INSERT VALUE ts_abapsdk_zip( op = 'install' version = i_version ) INTO TABLE lt_abapsdk_zipfiles.
-    INSERT VALUE ts_abapsdk_zip( op = 'uninstall' version = i_version ) INTO TABLE lt_abapsdk_zipfiles.
-
-    LOOP AT lt_abapsdk_zipfiles ASSIGNING FIELD-SYMBOL(<fs_abapsdk_zipfile>).
-
-      DATA(lv_zipfile_name) = build_zipfile_name( i_operation = <fs_abapsdk_zipfile>-op
-                                                  i_version   = <fs_abapsdk_zipfile>-version ).
-
-      DATA(lv_jsonfile_name) = build_jsonfile_name( i_operation = <fs_abapsdk_zipfile>-op
-                                                    i_version   = <fs_abapsdk_zipfile>-version ).
-
-      <fs_abapsdk_zipfile>-uri = |{ build_download_uri_prefix(  ) }{ lv_zipfile_name }|.
-
-      <fs_abapsdk_zipfile>-json_web = |{ build_download_uri_prefix(  ) }{ lv_jsonfile_name }|.
-
-      <fs_abapsdk_zipfile>-path = build_zipfile_path( i_zipfile_name       = lv_zipfile_name
-                                                      i_trans_logical_path = c_trans_logical_path ).
-
-      validate_zipfile_path( i_zipfile_path   = <fs_abapsdk_zipfile>-path
-                             i_logsubdir_name = c_logsubdir_name ).
-
-
-      IF check_file_writable_at( i_path = <fs_abapsdk_zipfile>-path ) = abap_false.
-        MESSAGE |File at path { <fs_abapsdk_zipfile>-path } not writable!| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-        lv_result = abap_false.
-        EXIT.
-      ENDIF.
-
-      cl_progress_indicator=>progress_indicate( i_text               = |Downloading { lv_zipfile_name } ...|
-                                                i_processed          = sy-tabix
-                                                i_total              = lines( lt_abapsdk_zipfiles )
-                                                i_output_immediately = abap_true ) ##NO_TEXT.
-
-      DATA(e_zipfile_blob) = me->download( i_absolute_uri = <fs_abapsdk_zipfile>-uri
-                                           i_blankstocrlf = abap_false ).
-
-
-
-      TRY.
-          open_for_output( <fs_abapsdk_zipfile>-path ).
-          TRANSFER e_zipfile_blob TO <fs_abapsdk_zipfile>-path.
-          CLOSE DATASET <fs_abapsdk_zipfile>-path.
-        CATCH cx_sy_file_authority INTO DATA(r_ex1).
-          RAISE EXCEPTION TYPE lcx_error
-            EXPORTING
-              previous = r_ex1
-              iv_msg   = r_ex1->get_text( ).
-        CATCH cx_sy_file_access_error INTO DATA(r_ex2).
-          RAISE EXCEPTION TYPE lcx_error
-            EXPORTING
-              previous = r_ex2
-              iv_msg   = r_ex1->get_text( ).
-        CATCH cx_root INTO DATA(r_ex).
-          RAISE EXCEPTION TYPE lcx_error
-            EXPORTING
-              previous = r_ex
-              iv_msg   = r_ex1->get_text( ).
-      ENDTRY.
-
-      IF sy-subrc <> 0.
-        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not convert data to XSTRING.| ##NO_TEXT.
-      ENDIF.
-
-    ENDLOOP.
-
-    IF NOT line_exists( mt_abapsdk_zipfiles[ op = 'install' version = i_version ] )
-      AND NOT line_exists( mt_abapsdk_zipfiles[ op = 'uninstall' version = i_version ] ).
-      INSERT LINES OF lt_abapsdk_zipfiles INTO TABLE mt_abapsdk_zipfiles.
-    ELSE.
-      LOOP AT mt_abapsdk_zipfiles ASSIGNING FIELD-SYMBOL(<fs_zip>).
-        LOOP AT lt_abapsdk_zipfiles INTO wa_abapsdk_zipfile.
-          IF <fs_zip>-op = wa_abapsdk_zipfile-op
-            AND <fs_zip>-version = wa_abapsdk_zipfile-version.
-            <fs_zip>-uri =  wa_abapsdk_zipfile-uri.
-            <fs_zip>-path =  wa_abapsdk_zipfile-path.
-            <fs_zip>-json_web =  wa_abapsdk_zipfile-json_web.
+        IF line_exists( it_t000[ cccategory = 'P' ] ).
+          r_result = abap_true.
+        ELSE.
+          r_result = abap_false.
+        ENDIF.
+
+      ENDMETHOD.
+
+
+      METHOD get_client_role.
+        SELECT SINGLE cccategory INTO @r_result FROM t000 AS t WHERE t~mandt = @i_client.
+          IF sy-subrc <> 0.
+            MESSAGE |Could not read client role from T000| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
           ENDIF.
-        ENDLOOP.
-      ENDLOOP.
-    ENDIF.
 
-    r_success = lv_result.
+        ENDMETHOD.
 
-
-  ENDMETHOD.
-
-
-  METHOD get_parameter.
-    DATA lv_value TYPE pfepvalue.
-    DATA lv_rc TYPE i.
-
-
-    CALL FUNCTION 'TH_GET_PARAMETER'
-      EXPORTING
-        parameter_name  = CONV pfeparname( iv_param )
-      IMPORTING
-        parameter_value = lv_value
-        rc              = lv_rc
-      EXCEPTIONS
-        not_authorized  = 1
-        OTHERS          = 2.
-
-    IF lv_rc <> 0 OR sy-subrc <> 0.
-      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not determine parameter { iv_param }| ##NO_TEXT.
-    ENDIF.
-    rv_value = lv_value.
-  ENDMETHOD.
+        METHOD get_running_jobs.
+          " --- Job already running?
+          CALL FUNCTION 'BP_FIND_JOBS_WITH_PROGRAM'
+            EXPORTING
+              abap_program_name             = i_jobname
+              status                        = 'R'  " Batch job already running in background?
+            TABLES
+              joblist                       = r_result
+            EXCEPTIONS
+              no_jobs_found                 = 1
+              program_specification_missing = 2
+              invalid_dialog_type           = 3
+              job_find_canceled             = 4
+              OTHERS                        = 5.
+          IF sy-subrc <> 0.
+* Implement suitable error handling here
+          ENDIF.
+        ENDMETHOD.
 
 
-  METHOD open_for_input.
-    DATA lv_os_msg TYPE text255.
-    OPEN DATASET iv_filename FOR INPUT IN BINARY MODE MESSAGE lv_os_msg.
-    IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE lcx_error
-        EXPORTING
-          iv_msg = |Error opening { iv_filename }: { lv_os_msg }| ##NO_TEXT.
-    ENDIF.
-  ENDMETHOD.
+        METHOD get_system_name.
+
+          CALL FUNCTION 'GET_SYSTEM_NAME'
+            IMPORTING
+              system_name = r_sysnam.
+
+        ENDMETHOD.
+
+        METHOD is_job_running.
+
+          DATA lt_joblist TYPE TABLE OF tbtcjob.
+          lt_joblist = get_running_jobs( i_jobname = sy-repid ).
+
+          IF lines( lt_joblist ) > 0.
+            r_result = abap_true.
+          ELSE.
+            r_result = abap_false.
+          ENDIF.
+
+        ENDMETHOD.
 
 
-  METHOD open_for_output.
-    DATA(lv_filename_to_check) = CONV fileextern( iv_filename ).
-    AUTHORITY-CHECK OBJECT 'S_DATASET'
-      ID 'PROGRAM' FIELD sy-repid
-      ID 'ACTVT' FIELD '34'
-      ID 'FILENAME' FIELD lv_filename_to_check ##AUTH_FLD_LEN.
-    IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE lcx_error
-        EXPORTING
-          iv_msg = |No permission to write to { iv_filename }| ##NO_TEXT.
-    ENDIF.
 
-    DATA lv_os_msg TYPE text255.
-    OPEN DATASET iv_filename FOR OUTPUT IN BINARY MODE MESSAGE lv_os_msg.
-    IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE lcx_error
-        EXPORTING
-          iv_msg = |Error opening { iv_filename }: { lv_os_msg }| ##NO_TEXT.
-    ENDIF.
-  ENDMETHOD.
 
-  METHOD check_bapiret.
-    LOOP AT it_bapiret2 ASSIGNING FIELD-SYMBOL(<bapiret>) WHERE type CA 'AE'.
-      IF <bapiret>-message IS NOT INITIAL.
-        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not put certificate: { <bapiret>-message }| ##NO_TEXT.
-      ELSE.
-        DATA lv_msg TYPE string.
-        MESSAGE ID <bapiret>-id TYPE <bapiret>-type NUMBER <bapiret>-number
-          WITH <bapiret>-message_v1 <bapiret>-message_v2 <bapiret>-message_v3 <bapiret>-message_v4
-          INTO lv_msg.
-        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not put certificate: { lv_msg }| ##NO_TEXT.
-      ENDIF.
-    ENDLOOP.
-  ENDMETHOD.
+        METHOD check_file_writable_at.
+          TRY.
+              open_for_output( i_path ).
+              CLOSE DATASET i_path.
+              r_result = abap_true.
+            CATCH lcx_error INTO DATA(lo_ex).
+              MESSAGE |Path { i_path } not writable, reason: { lo_ex->av_msg }| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
+          ENDTRY.
+        ENDMETHOD.
 
-  METHOD binary_to_xstring.
-    CALL FUNCTION 'SCMS_BINARY_TO_XSTRING'
-      EXPORTING
-        input_length = iv_length
-      IMPORTING
-        buffer       = ov_xstring
-      TABLES
-        binary_tab   = it_bintab
-      EXCEPTIONS
-        failed       = 1
-        OTHERS       = 2.
-    IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not convert bin table to xstring| ##NO_TEXT.
-    ENDIF.
-  ENDMETHOD.
+
+        METHOD check_file_exists_at.
+
+          DATA(lv_path) = CONV pfebackuppro( i_path ).
+          CALL FUNCTION 'PFL_CHECK_OS_FILE_EXISTENCE'
+            EXPORTING
+              long_filename         = lv_path
+            IMPORTING
+              file_exists           = r_result
+            EXCEPTIONS
+              authorization_missing = 1
+              OTHERS                = 2.
+
+          CASE sy-subrc.
+            WHEN 0.
+              " all good
+            WHEN 1.
+              RAISE EXCEPTION TYPE cx_sy_file_authority.
+            WHEN 2.
+              RAISE EXCEPTION TYPE cx_sy_file_io. " TODO: Find/Create more appropriate exception for generic case
+          ENDCASE.
+
+        ENDMETHOD.
+
+        METHOD update_abapsdk_zipfile_paths.
+
+          DATA(lv_exists) = abap_false.
+
+          LOOP AT mt_abapsdk_zipfiles INTO DATA(wa_abapsdk_zipfile).
+
+            lv_exists = check_file_exists_at( i_path = wa_abapsdk_zipfile-path ).
+
+            IF lv_exists = abap_true.
+              CONTINUE.
+            ELSE.
+              wa_abapsdk_zipfile-path = ''.
+              MODIFY TABLE mt_abapsdk_zipfiles FROM wa_abapsdk_zipfile.
+            ENDIF.
+
+          ENDLOOP.
+        ENDMETHOD.
+
+
+        METHOD check_abapsdk_zipfile_exists.
+
+          IF line_exists( mt_abapsdk_zipfiles[ op = i_operation version = i_version ] ).
+            r_result = check_file_exists_at( mt_abapsdk_zipfiles[ op = i_operation version = i_version ]-path ).
+          ELSE.
+            r_result = abap_false.
+          ENDIF.
+
+        ENDMETHOD.
+
+
+        METHOD has_internet_access.
+
+          DATA lv_result TYPE abap_bool.
+          DATA lr_http_client TYPE REF TO if_http_client.
+          DATA lv_reason TYPE string.
+          DATA lv_url TYPE string.
+          DATA lv_http_rc TYPE i.
+          DATA lv_status_text TYPE string.
+
+          lv_result = abap_false.
+
+          lv_url = 'http://ocsp.r2m02.amazontrust.com'.
+
+          TRY.
+              cl_http_client=>create_by_url( EXPORTING url = lv_url IMPORTING client = lr_http_client ).
+
+              lr_http_client->request->set_method( if_http_request=>co_request_method_get ).
+
+              lr_http_client->send( timeout = if_http_client=>co_timeout_default ).
+
+              lr_http_client->receive( EXCEPTIONS http_communication_failure = 1
+                                                  http_invalid_state         = 2
+                                                  http_processing_failed     = 3
+                                                  OTHERS                     = 4 ).
+
+              IF sy-subrc <> 0.
+                lv_result = abap_false.
+              ELSE.
+                lv_result = abap_true.
+              ENDIF.
+
+            CATCH cx_root INTO DATA(r_ex).
+              RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = r_ex->get_text( ).
+          ENDTRY.
+
+          r_result = lv_result.
+
+        ENDMETHOD.
+
+
+        METHOD run_foreground.
+
+          DATA: l_tp_ret_code_inst TYPE stpa-retcode.
+          DATA: ls_exception_inst TYPE stmscalert.
+
+          DATA: l_tp_ret_code_uninst TYPE stpa-retcode.
+          DATA: ls_exception_uninst TYPE stmscalert.
+
+          DATA(lt_modules_to_be_installed) = i_modules_to_be_installed.
+          DATA(lt_modules_to_be_deleted) = i_modules_to_be_deleted.
+
+          DATA lt_transport_list_inst TYPE stms_tr_requests.
+          DATA lt_transport_list_uninst TYPE stms_tr_requests.
+
+          DATA lt_avail_modules_inst TYPE tt_abapsdk_module.
+          lt_avail_modules_inst = get_abapsdk_avail_modules_json(
+            i_operation = 'install'
+            i_source    = 'zip'
+            i_version   = i_target_version
+          ).
+
+          LOOP AT lt_modules_to_be_installed ASSIGNING FIELD-SYMBOL(<fs_module_to_be_installed>).
+
+            get_abapsdk_transport_cofile(
+              EXPORTING
+                i_tla         = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla
+                i_transport   = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
+                i_operation   = 'install'
+                i_version     = i_target_version
+              IMPORTING
+                e_cofile_name = DATA(l_cofile_name)
+                e_cofile_blob = DATA(l_cofile_blob) ).
+
+
+            get_abapsdk_transport_datafile(
+              EXPORTING
+                i_tla           = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla
+                i_transport     = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
+                i_operation     = 'install'
+                i_version       = i_target_version
+              IMPORTING
+                e_datafile_name = DATA(l_datafile_name)
+                e_datafile_blob = DATA(l_datafile_blob) ).
+
+
+            DATA(l_success_write) = write_abapsdk_transport_trdir(
+              i_cofile_name   = l_cofile_name
+              i_datafile_name = l_datafile_name
+              i_cofile_blob   = l_cofile_blob
+              i_datafile_blob = l_datafile_blob ).
+
+            INSERT VALUE stms_tr_request(
+            trkorr = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
+            tarcli = sy-mandt
+            ) INTO TABLE lt_transport_list_inst.
+
+          ENDLOOP.
+
+          CALL METHOD import_abapsdk_transports
+            EXPORTING
+              it_transport_names = lt_transport_list_inst
+            IMPORTING
+              e_tp_retcode       = l_tp_ret_code_inst
+              es_exception       = ls_exception_inst.
+
+          e_tp_rc_inst = l_tp_ret_code_inst.
+          es_exception_inst = ls_exception_inst.
+
+
+
+
+
+          LOOP AT lt_modules_to_be_deleted ASSIGNING FIELD-SYMBOL(<fs_module_to_be_deleted>).
+
+            DATA lt_avail_modules_uninst TYPE tt_abapsdk_module.
+            lt_avail_modules_uninst = get_abapsdk_avail_modules_json(
+              i_operation = 'uninstall'
+              i_source    = 'zip'
+              i_version   = i_target_version
+            ).
+
+
+            get_abapsdk_transport_cofile(
+              EXPORTING
+                i_tla         = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-tla
+                i_transport   = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
+                i_operation   = 'uninstall'
+                i_version     = i_target_version
+              IMPORTING
+                e_cofile_name = DATA(l_uninstall_cofile_name)
+                e_cofile_blob = DATA(l_uninstall_cofile_blob) ).
+
+
+            get_abapsdk_transport_datafile(
+              EXPORTING
+                i_tla           = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-tla
+                i_transport     = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
+                i_operation     = 'uninstall'
+                i_version       = i_target_version
+              IMPORTING
+                e_datafile_name = DATA(l_uninstall_datafile_name)
+                e_datafile_blob = DATA(l_uninstall_datafile_blob) ).
+
+
+            write_abapsdk_transport_trdir(
+              EXPORTING
+                i_cofile_name   = l_uninstall_cofile_name
+                i_datafile_name = l_uninstall_datafile_name
+                i_cofile_blob   = l_uninstall_cofile_blob
+                i_datafile_blob = l_uninstall_datafile_blob
+              RECEIVING
+                r_success       = DATA(l_uninstall_success_write) ).
+
+
+            INSERT VALUE stms_tr_request(
+            trkorr = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
+            tarcli = sy-mandt
+            ) INTO TABLE lt_transport_list_uninst.
+
+          ENDLOOP.
+
+          CALL METHOD import_abapsdk_transports
+            EXPORTING
+              it_transport_names = lt_transport_list_uninst
+            IMPORTING
+              e_tp_retcode       = l_tp_ret_code_uninst
+              es_exception       = ls_exception_uninst.
+
+          e_tp_rc_uninst = l_tp_ret_code_uninst.
+          es_exception_uninst = ls_exception_uninst.
+
+
+        ENDMETHOD.
+
+
+        METHOD submit_batch_job.
+
+          DATA(lt_modules_to_be_installed) = i_modules_to_be_installed.
+          DATA(lt_modules_to_be_deleted) = i_modules_to_be_deleted.
+          DATA(lv_target_version) = i_target_version.
+
+
+          " Export to shared memory and batch job submission need to go together
+          DELETE FROM SHARED BUFFER indx(mi) ID 'MOD_INST'.
+          EXPORT st_modules_to_be_installed = lt_modules_to_be_installed TO SHARED BUFFER indx(mi) ID 'MOD_INST'.
+          DELETE FROM SHARED BUFFER indx(md) ID 'MOD_DELE'.
+          EXPORT st_modules_to_be_deleted = lt_modules_to_be_deleted TO SHARED BUFFER indx(md) ID 'MOD_DELE'.
+          DELETE FROM SHARED BUFFER indx(tv) ID 'TAR_VERS'.
+          EXPORT s_target_version = lv_target_version TO SHARED BUFFER indx(tv) ID 'TAR_VERS'.
+
+
+          DATA(lo_job) = NEW cl_bp_abap_job( ).
+          lo_job->set_name( CONV char32( sy-repid ) ).
+          lo_job->set_report( sy-repid ).
+          lo_job->if_bp_job_engine~generate_job_count(
+            EXCEPTIONS
+              cant_create_job  = 1
+              invalid_job_data = 2
+              jobname_missing  = 3 ).
+          IF sy-subrc = 0.
+            lo_job->if_bp_job_engine~plan_job_step(
+              EXCEPTIONS
+                bad_priparams           = 11
+                bad_xpgflags            = 12
+                invalid_jobdata         = 13
+                jobname_missing         = 14
+                job_notex               = 15
+                job_submit_failed       = 16
+                program_missing         = 17
+                prog_abap_and_extpg_set = 18 ).
+          ENDIF.
+          IF sy-subrc = 0.
+            lo_job->if_bp_job_engine~start_immediately( EXCEPTIONS cant_start_immediate = 21 invalid_startdate = 22 jobname_missing = 23 job_close_failed = 24 job_nosteps = 25 job_notex = 26 ).
+          ENDIF.
+
+          IF sy-subrc <> 0.
+            RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Failed to submit job { sy-repid }: subrc = { sy-subrc }| ##NO_TEXT.
+          ENDIF.
+
+          r_result = lo_job->jobcount.
+
+        ENDMETHOD.
+
+
+        METHOD run_background.
+
+          DATA: l_tp_rc_inst TYPE stpa-retcode.
+          DATA: ls_exception_inst TYPE stmscalert.
+          DATA: l_tp_rc_uninst TYPE stpa-retcode.
+          DATA: ls_exception_uninst TYPE stmscalert.
+
+
+          DATA: st_modules_to_be_installed TYPE tt_abapsdk_tla.
+          DATA: st_modules_to_be_deleted TYPE tt_abapsdk_tla.
+          DATA: s_target_version TYPE string.
+
+          DATA: lt_transport_list_inst TYPE stms_tr_requests.
+          DATA: lt_transport_list_uninst TYPE stms_tr_requests.
+          DATA: lt_abapsdk_zipfiles TYPE tt_abapsdk_zip.
+          DATA: wa_zipfile_inst TYPE ts_abapsdk_zip.
+
+          IMPORT st_modules_to_be_installed = st_modules_to_be_installed FROM SHARED BUFFER indx(mi) ID 'MOD_INST'.
+          IMPORT st_modules_to_be_deleted = st_modules_to_be_deleted FROM SHARED BUFFER indx(md) ID 'MOD_DELE'.
+          IMPORT s_target_version = s_target_version FROM SHARED BUFFER indx(tv) ID 'TAR_VERS'.
+
+
+          IF check_abapsdk_zipfile_exists( i_operation = 'install'
+                                           i_version = s_target_version ) = abap_false.
+
+
+            wa_zipfile_inst-op = 'install' ##NO_TEXT.
+            wa_zipfile_inst-version = s_target_version.
+
+            DATA(lv_zipfile_name_inst) = build_zipfile_name( i_operation = wa_zipfile_inst-op i_version = s_target_version ).
+
+            wa_zipfile_inst-uri = |{ build_download_uri_prefix( ) }{ lv_zipfile_name_inst }|.
+
+            wa_zipfile_inst-json_web = |{ build_download_uri_prefix( ) }{ build_jsonfile_name( i_operation = wa_zipfile_inst-op i_version = s_target_version ) }|.
+
+            wa_zipfile_inst-path = build_zipfile_path( i_zipfile_name       = lv_zipfile_name_inst
+                                                       i_trans_logical_path = c_trans_logical_path ).
+
+            validate_zipfile_path( i_zipfile_path   = wa_zipfile_inst-path
+                                   i_logsubdir_name = c_logsubdir_name ).
+
+            APPEND wa_zipfile_inst TO mt_abapsdk_zipfiles.  " save for later
+            APPEND wa_zipfile_inst TO lt_abapsdk_zipfiles.  " save for now
+
+          ELSE.
+            wa_zipfile_inst = mt_abapsdk_zipfiles[ op = 'install' version = s_target_version ].
+            APPEND wa_zipfile_inst TO lt_abapsdk_zipfiles.  " save for now
+          ENDIF.
+
+          IF check_file_exists_at( lt_abapsdk_zipfiles[ op = 'install' version = s_target_version ]-path ) = abap_false.
+            download_abapsdk_zipfiles( i_file_list = lt_abapsdk_zipfiles
+                                       i_version   = s_target_version ).
+          ENDIF.
+
+
+          IF check_abapsdk_zipfile_exists( i_operation = 'uninstall'
+                                           i_version = s_target_version ) = abap_false.
+            DATA wa_zipfile_uninst TYPE ts_abapsdk_zip.
+            wa_zipfile_uninst-op = 'uninstall' ##NO_TEXT.
+            wa_zipfile_uninst-version = s_target_version.
+
+            DATA(lv_zipfile_name_uninst) = build_zipfile_name( i_operation = wa_zipfile_uninst-op
+                                                               i_version   = s_target_version ).
+
+            wa_zipfile_uninst-uri = |{ build_download_uri_prefix( ) }{ lv_zipfile_name_uninst }|.
+
+            wa_zipfile_uninst-json_web = |{ build_download_uri_prefix( ) }{ build_jsonfile_name( i_operation = wa_zipfile_uninst-op i_version = s_target_version ) }|.
+
+            wa_zipfile_uninst-path = build_zipfile_path( i_zipfile_name       = lv_zipfile_name_uninst
+                                                         i_trans_logical_path = c_trans_logical_path ).
+
+            validate_zipfile_path( i_zipfile_path   = wa_zipfile_uninst-path
+                                   i_logsubdir_name = c_logsubdir_name ).
+
+            APPEND wa_zipfile_uninst TO mt_abapsdk_zipfiles.
+            APPEND wa_zipfile_uninst TO lt_abapsdk_zipfiles.
+
+          ELSE.
+            wa_zipfile_uninst = mt_abapsdk_zipfiles[ op = 'uninstall' version = s_target_version ].
+            APPEND wa_zipfile_uninst TO lt_abapsdk_zipfiles.  " save for now
+          ENDIF.
+
+          IF check_file_exists_at( lt_abapsdk_zipfiles[ op = 'uninstall' version = s_target_version ]-path ) = abap_false.
+            download_abapsdk_zipfiles( i_file_list = lt_abapsdk_zipfiles
+                                       i_version   = s_target_version ).
+          ENDIF.
+
+
+          WRITE / |In background mode| ##NO_TEXT.
+          WRITE /.
+
+          WRITE /.
+          WRITE / |Modules to be installed (transport file { wa_zipfile_inst-path }| ##NO_TEXT.
+          LOOP AT st_modules_to_be_installed ASSIGNING FIELD-SYMBOL(<fs_mod_inst>).
+            WRITE <fs_mod_inst>-tla && | |.
+          ENDLOOP.
+
+          WRITE /.
+          WRITE / |to be deleted (transport file { wa_zipfile_uninst-path }| ##NO_TEXT.
+          LOOP AT st_modules_to_be_deleted ASSIGNING FIELD-SYMBOL(<fs_mod_dele>).
+            WRITE / <fs_mod_dele>-tla && | |.
+          ENDLOOP.
+
+          DATA lt_avail_modules_inst TYPE tt_abapsdk_module.
+          lt_avail_modules_inst = get_abapsdk_avail_modules_json(
+            i_operation = wa_zipfile_inst-op
+            i_source    = 'zip'
+            i_version   = wa_zipfile_inst-version
+          ).
+
+          LOOP AT st_modules_to_be_installed ASSIGNING FIELD-SYMBOL(<fs_module_to_be_installed>).
+            get_abapsdk_transport_cofile(
+              EXPORTING
+                i_tla         = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla
+                i_transport   = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
+                i_operation   = 'install'
+                i_version     = s_target_version
+              IMPORTING
+                e_cofile_name = DATA(l_cofile_name)
+                e_cofile_blob = DATA(l_cofile_blob) ).
+
+            WRITE / |Downloaded cofile | && lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport &&
+                     | for TLA | && lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla ##NO_TEXT.
+
+            get_abapsdk_transport_datafile(
+              EXPORTING
+                i_tla           = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla
+                i_transport     = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
+                i_operation     = 'install'
+                i_version       = s_target_version
+              IMPORTING
+                e_datafile_name = DATA(l_datafile_name)
+                e_datafile_blob = DATA(l_datafile_blob) ).
+
+            WRITE / |Downloaded data file | && lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport &&
+                     | for TLA | && lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla ##NO_TEXT.
+
+            write_abapsdk_transport_trdir(
+              EXPORTING
+                i_cofile_name   = l_cofile_name
+                i_datafile_name = l_datafile_name
+                i_cofile_blob   = l_cofile_blob
+                i_datafile_blob = l_datafile_blob
+              RECEIVING
+                r_success       = DATA(l_success_write) ).
+
+            WRITE / |Wrote cofile and datafile for transport | && lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport &&
+                     | for TLA | && lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla && | successfully? -> | && l_success_write ##NO_TEXT.
+
+
+            INSERT VALUE stms_tr_request( trkorr = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport ) INTO TABLE lt_transport_list_inst.
+          ENDLOOP.
+
+
+          CALL METHOD import_abapsdk_transports
+            EXPORTING
+              it_transport_names = lt_transport_list_inst
+            IMPORTING
+              e_tp_retcode       = l_tp_rc_inst
+              es_exception       = ls_exception_inst.
+
+          WRITE / |Imported installation transport with tp return code: | && l_tp_rc_inst && |, message was: | && ls_exception_inst-error ##NO_TEXT.
+
+
+          DATA lt_avail_modules_uninst TYPE tt_abapsdk_module.
+          lt_avail_modules_uninst = get_abapsdk_avail_modules_json(
+            i_operation = wa_zipfile_uninst-op
+            i_source    = 'zip'
+            i_version   = wa_zipfile_uninst-version
+          ).
+
+
+          LOOP AT st_modules_to_be_deleted ASSIGNING FIELD-SYMBOL(<fs_module_to_be_deleted>).
+
+
+            get_abapsdk_transport_cofile(
+              EXPORTING
+                i_tla         = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-tla
+                i_transport   = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
+                i_operation   = 'uninstall'
+                i_version     = s_target_version
+              IMPORTING
+                e_cofile_name = DATA(l_uninstall_cofile_name)
+                e_cofile_blob = DATA(l_uninstall_cofile_blob) ).
+
+
+            get_abapsdk_transport_datafile(
+              EXPORTING
+                i_tla           = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-tla
+                i_transport     = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
+                i_operation     = 'uninstall'
+                i_version       = s_target_version
+              IMPORTING
+                e_datafile_name = DATA(l_uninstall_datafile_name)
+                e_datafile_blob = DATA(l_uninstall_datafile_blob) ).
+
+
+            write_abapsdk_transport_trdir(
+              EXPORTING
+                i_cofile_name   = l_uninstall_cofile_name
+                i_datafile_name = l_uninstall_datafile_name
+                i_cofile_blob   = l_uninstall_cofile_blob
+                i_datafile_blob = l_uninstall_datafile_blob
+              RECEIVING
+                r_success       = DATA(l_uninstall_success_write) ).
+
+            INSERT VALUE stms_tr_request( trkorr = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport ) INTO TABLE lt_transport_list_uninst.
+
+          ENDLOOP.
+
+
+          CALL METHOD import_abapsdk_transports
+            EXPORTING
+              it_transport_names = lt_transport_list_uninst
+            IMPORTING
+              e_tp_retcode       = l_tp_rc_uninst
+              es_exception       = ls_exception_uninst.
+
+          WRITE / |Imported uninstallation transports with tp return code: | && l_tp_rc_uninst && |, message was: | && ls_exception_uninst-error ##NO_TEXT.
+
+          DELETE FROM SHARED BUFFER indx(mi) ID 'MOD_INST'.
+          DELETE FROM SHARED BUFFER indx(md) ID 'MOD_DELE'.
+          DELETE FROM SHARED BUFFER indx(tv) ID 'TAR_VERS'.
+
+        ENDMETHOD.
+
+
+        METHOD download_abapsdk_zipfiles.
+          DATA l_dir_tmp_path TYPE text255.
+          DATA lv_result TYPE abap_bool VALUE abap_true.
+          DATA lt_abapsdk_zipfiles TYPE tt_abapsdk_zip.
+          DATA wa_abapsdk_zipfile TYPE ts_abapsdk_zip.
+
+          INSERT VALUE ts_abapsdk_zip( op = 'install' version = i_version ) INTO TABLE lt_abapsdk_zipfiles.
+          INSERT VALUE ts_abapsdk_zip( op = 'uninstall' version = i_version ) INTO TABLE lt_abapsdk_zipfiles.
+
+          LOOP AT lt_abapsdk_zipfiles ASSIGNING FIELD-SYMBOL(<fs_abapsdk_zipfile>).
+
+            DATA(lv_zipfile_name) = build_zipfile_name( i_operation = <fs_abapsdk_zipfile>-op
+                                                        i_version   = <fs_abapsdk_zipfile>-version ).
+
+            DATA(lv_jsonfile_name) = build_jsonfile_name( i_operation = <fs_abapsdk_zipfile>-op
+                                                          i_version   = <fs_abapsdk_zipfile>-version ).
+
+            <fs_abapsdk_zipfile>-uri = |{ build_download_uri_prefix(  ) }{ lv_zipfile_name }|.
+
+            <fs_abapsdk_zipfile>-json_web = |{ build_download_uri_prefix(  ) }{ lv_jsonfile_name }|.
+
+            <fs_abapsdk_zipfile>-path = build_zipfile_path( i_zipfile_name       = lv_zipfile_name
+                                                            i_trans_logical_path = c_trans_logical_path ).
+
+            validate_zipfile_path( i_zipfile_path   = <fs_abapsdk_zipfile>-path
+                                   i_logsubdir_name = c_logsubdir_name ).
+
+
+            IF check_file_writable_at( i_path = <fs_abapsdk_zipfile>-path ) = abap_false.
+              MESSAGE |File at path { <fs_abapsdk_zipfile>-path } not writable!| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
+              lv_result = abap_false.
+              EXIT.
+            ENDIF.
+
+            cl_progress_indicator=>progress_indicate( i_text               = |Downloading { lv_zipfile_name } ...|
+                                                      i_processed          = sy-tabix
+                                                      i_total              = lines( lt_abapsdk_zipfiles )
+                                                      i_output_immediately = abap_true ) ##NO_TEXT.
+
+            DATA(e_zipfile_blob) = me->download( i_absolute_uri = <fs_abapsdk_zipfile>-uri
+                                                 i_blankstocrlf = abap_false ).
+
+
+
+            TRY.
+                open_for_output( <fs_abapsdk_zipfile>-path ).
+                TRANSFER e_zipfile_blob TO <fs_abapsdk_zipfile>-path.
+                CLOSE DATASET <fs_abapsdk_zipfile>-path.
+              CATCH cx_sy_file_authority INTO DATA(r_ex1).
+                RAISE EXCEPTION TYPE lcx_error
+                  EXPORTING
+                    previous = r_ex1
+                    iv_msg   = r_ex1->get_text( ).
+              CATCH cx_sy_file_access_error INTO DATA(r_ex2).
+                RAISE EXCEPTION TYPE lcx_error
+                  EXPORTING
+                    previous = r_ex2
+                    iv_msg   = r_ex1->get_text( ).
+              CATCH cx_root INTO DATA(r_ex).
+                RAISE EXCEPTION TYPE lcx_error
+                  EXPORTING
+                    previous = r_ex
+                    iv_msg   = r_ex1->get_text( ).
+            ENDTRY.
+
+            IF sy-subrc <> 0.
+              RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not convert data to XSTRING.| ##NO_TEXT.
+            ENDIF.
+
+          ENDLOOP.
+
+          IF NOT line_exists( mt_abapsdk_zipfiles[ op = 'install' version = i_version ] )
+            AND NOT line_exists( mt_abapsdk_zipfiles[ op = 'uninstall' version = i_version ] ).
+            INSERT LINES OF lt_abapsdk_zipfiles INTO TABLE mt_abapsdk_zipfiles.
+          ELSE.
+            LOOP AT mt_abapsdk_zipfiles ASSIGNING FIELD-SYMBOL(<fs_zip>).
+              LOOP AT lt_abapsdk_zipfiles INTO wa_abapsdk_zipfile.
+                IF <fs_zip>-op = wa_abapsdk_zipfile-op
+                  AND <fs_zip>-version = wa_abapsdk_zipfile-version.
+                  <fs_zip>-uri =  wa_abapsdk_zipfile-uri.
+                  <fs_zip>-path =  wa_abapsdk_zipfile-path.
+                  <fs_zip>-json_web =  wa_abapsdk_zipfile-json_web.
+                ENDIF.
+              ENDLOOP.
+            ENDLOOP.
+          ENDIF.
+
+          r_success = lv_result.
+
+
+        ENDMETHOD.
+
+
+        METHOD get_parameter.
+          DATA lv_value TYPE pfepvalue.
+          DATA lv_rc TYPE i.
+
+
+          CALL FUNCTION 'TH_GET_PARAMETER'
+            EXPORTING
+              parameter_name  = CONV pfeparname( iv_param )
+            IMPORTING
+              parameter_value = lv_value
+              rc              = lv_rc
+            EXCEPTIONS
+              not_authorized  = 1
+              OTHERS          = 2.
+
+          IF lv_rc <> 0 OR sy-subrc <> 0.
+            RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not determine parameter { iv_param }| ##NO_TEXT.
+          ENDIF.
+          rv_value = lv_value.
+        ENDMETHOD.
+
+
+        METHOD open_for_input.
+          DATA lv_os_msg TYPE text255.
+          OPEN DATASET iv_filename FOR INPUT IN BINARY MODE MESSAGE lv_os_msg.
+          IF sy-subrc <> 0.
+            RAISE EXCEPTION TYPE lcx_error
+              EXPORTING
+                iv_msg = |Error opening { iv_filename }: { lv_os_msg }| ##NO_TEXT.
+          ENDIF.
+        ENDMETHOD.
+
+
+        METHOD open_for_output.
+          DATA(lv_filename_to_check) = CONV fileextern( iv_filename ).
+          AUTHORITY-CHECK OBJECT 'S_DATASET'
+            ID 'PROGRAM' FIELD sy-repid
+            ID 'ACTVT' FIELD '34'
+            ID 'FILENAME' FIELD lv_filename_to_check ##AUTH_FLD_LEN.
+          IF sy-subrc <> 0.
+            RAISE EXCEPTION TYPE lcx_error
+              EXPORTING
+                iv_msg = |No permission to write to { iv_filename }| ##NO_TEXT.
+          ENDIF.
+
+          DATA lv_os_msg TYPE text255.
+          OPEN DATASET iv_filename FOR OUTPUT IN BINARY MODE MESSAGE lv_os_msg.
+          IF sy-subrc <> 0.
+            RAISE EXCEPTION TYPE lcx_error
+              EXPORTING
+                iv_msg = |Error opening { iv_filename }: { lv_os_msg }| ##NO_TEXT.
+          ENDIF.
+        ENDMETHOD.
+
+        METHOD check_bapiret.
+          LOOP AT it_bapiret2 ASSIGNING FIELD-SYMBOL(<bapiret>) WHERE type CA 'AE'.
+            IF <bapiret>-message IS NOT INITIAL.
+              RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not put certificate: { <bapiret>-message }| ##NO_TEXT.
+            ELSE.
+              DATA lv_msg TYPE string.
+              MESSAGE ID <bapiret>-id TYPE <bapiret>-type NUMBER <bapiret>-number
+                WITH <bapiret>-message_v1 <bapiret>-message_v2 <bapiret>-message_v3 <bapiret>-message_v4
+                INTO lv_msg.
+              RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not put certificate: { lv_msg }| ##NO_TEXT.
+            ENDIF.
+          ENDLOOP.
+        ENDMETHOD.
+
+        METHOD binary_to_xstring.
+          CALL FUNCTION 'SCMS_BINARY_TO_XSTRING'
+            EXPORTING
+              input_length = iv_length
+            IMPORTING
+              buffer       = ov_xstring
+            TABLES
+              binary_tab   = it_bintab
+            EXCEPTIONS
+              failed       = 1
+              OTHERS       = 2.
+          IF sy-subrc <> 0.
+            RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not convert bin table to xstring| ##NO_TEXT.
+          ENDIF.
+        ENDMETHOD.
 ENDCLASS.
 
 
 
 CLASS lcl_abapsdk_pm_tree_controller DEFINITION FINAL FRIENDS lcl_abapsdk_package_manager.
-  PUBLIC SECTION.
+PUBLIC SECTION.
 
-    CONSTANTS: c_operation_none              TYPE i VALUE 0,
-               c_operation_install           TYPE i VALUE 1,
-               c_operation_delete            TYPE i VALUE 2,
-               c_operation_update            TYPE i VALUE 3,
-               c_batch_rec_threshold         TYPE i VALUE 5,
-               c_sapgui_autologout_threshold TYPE i VALUE 900.
+  CONSTANTS: c_operation_none              TYPE i VALUE 0,
+             c_operation_install           TYPE i VALUE 1,
+             c_operation_delete            TYPE i VALUE 2,
+             c_operation_update            TYPE i VALUE 3,
+             c_batch_rec_threshold         TYPE i VALUE 5,
+             c_sapgui_autologout_threshold TYPE i VALUE 900.
 
-    INTERFACES
-      if_salv_csqt_content_manager.
+  INTERFACES
+    if_salv_csqt_content_manager.
 
-    TYPES:
-      BEGIN OF ts_named_salv_node_key,
-        node_name TYPE string,
-        key       TYPE salv_de_node_key,
-      END OF ts_named_salv_node_key,
-      tt_named_salv_node_key TYPE STANDARD TABLE OF ts_named_salv_node_key WITH KEY node_name.
+  TYPES:
+    BEGIN OF ts_named_salv_node_key,
+      node_name TYPE string,
+      key       TYPE salv_de_node_key,
+    END OF ts_named_salv_node_key,
+    tt_named_salv_node_key TYPE STANDARD TABLE OF ts_named_salv_node_key WITH KEY node_name.
 
 
-    DATA:
-      mr_abapsdk_package_manager   TYPE REF TO lcl_abapsdk_package_manager,
-      mr_container                 TYPE REF TO cl_gui_container,
-      mr_tree                      TYPE REF TO cl_salv_tree,
-      mt_treetab                   TYPE tt_abapsdk_module,
-      mt_installed_modules         TYPE tt_abapsdk_module,
-      mt_available_modules_inst    TYPE tt_abapsdk_module,
-      mt_available_modules_uninst  TYPE tt_abapsdk_module,
-      mt_popular_modules           TYPE tt_abapsdk_tla,
-      mt_modules_to_be_installed   TYPE tt_abapsdk_tla,
-      mt_modules_to_be_deleted     TYPE tt_abapsdk_tla,
-      mt_modules_to_be_updated     TYPE tt_abapsdk_tla,
-      m_abapsdk_available_version  TYPE string,
-      mt_folder_node_keys          TYPE tt_named_salv_node_key,
-      m_abapsdk_core_expanded      TYPE abap_bool VALUE abap_true,
-      m_available_modules_expanded TYPE abap_bool VALUE abap_true,
-      m_installed_modules_expanded TYPE abap_bool VALUE abap_true,
-      m_fullscreen                 TYPE abap_bool VALUE abap_false.
+  DATA:
+    mr_abapsdk_package_manager   TYPE REF TO lcl_abapsdk_package_manager,
+    mr_container                 TYPE REF TO cl_gui_container,
+    mr_tree                      TYPE REF TO cl_salv_tree,
+    mt_treetab                   TYPE tt_abapsdk_module,
+    mt_installed_modules         TYPE tt_abapsdk_module,
+    mt_available_modules_inst    TYPE tt_abapsdk_module,
+    mt_available_modules_uninst  TYPE tt_abapsdk_module,
+    mt_popular_modules           TYPE tt_abapsdk_tla,
+    mt_modules_to_be_installed   TYPE tt_abapsdk_tla,
+    mt_modules_to_be_deleted     TYPE tt_abapsdk_tla,
+    mt_modules_to_be_updated     TYPE tt_abapsdk_tla,
+    m_abapsdk_available_version  TYPE string,
+    mt_folder_node_keys          TYPE tt_named_salv_node_key,
+    m_abapsdk_core_expanded      TYPE abap_bool VALUE abap_true,
+    m_available_modules_expanded TYPE abap_bool VALUE abap_true,
+    m_installed_modules_expanded TYPE abap_bool VALUE abap_true,
+    m_fullscreen                 TYPE abap_bool VALUE abap_false.
 
-    ALIASES
-      fill_container_content FOR if_salv_csqt_content_manager~fill_container_content.
+  ALIASES
+    fill_container_content FOR if_salv_csqt_content_manager~fill_container_content.
 
-    METHODS:
-      constructor IMPORTING ir_abapsdk_package_manager TYPE REF TO lcl_abapsdk_package_manager
-                  RAISING   lcx_error,
-      get_modules_to_be_installed IMPORTING i_target_version                  TYPE string
-                                  RETURNING VALUE(rt_modules_to_be_installed) TYPE tt_abapsdk_tla,
-      get_modules_to_be_deleted IMPORTING i_target_version                TYPE string
-                                RETURNING VALUE(rt_modules_to_be_deleted) TYPE tt_abapsdk_tla,
-      get_modules_to_be_updated IMPORTING i_target_version                TYPE string
-                                RETURNING VALUE(rt_modules_to_be_updated) TYPE tt_abapsdk_tla,
-      save_node_key IMPORTING ir_node_name TYPE string
-                              ir_node_key  TYPE salv_de_node_key,
-      is_core_installed RETURNING VALUE(r_result) TYPE abap_bool,
-      is_fullscreen RETURNING VALUE(r_result) TYPE abap_bool,
-      is_sapgui_html RETURNING VALUE(r_result) TYPE abap_bool,
-      is_sapgui_timeout_sufficient RETURNING VALUE(r_result) TYPE abap_bool
+  METHODS:
+    constructor IMPORTING ir_abapsdk_package_manager TYPE REF TO lcl_abapsdk_package_manager
+                RAISING   lcx_error,
+    get_modules_to_be_installed IMPORTING i_target_version                  TYPE string
+                                RETURNING VALUE(rt_modules_to_be_installed) TYPE tt_abapsdk_tla,
+    get_modules_to_be_deleted IMPORTING i_target_version                TYPE string
+                              RETURNING VALUE(rt_modules_to_be_deleted) TYPE tt_abapsdk_tla,
+    get_modules_to_be_updated IMPORTING i_target_version                TYPE string
+                              RETURNING VALUE(rt_modules_to_be_updated) TYPE tt_abapsdk_tla,
+    save_node_key IMPORTING ir_node_name TYPE string
+                            ir_node_key  TYPE salv_de_node_key,
+    is_core_installed RETURNING VALUE(r_result) TYPE abap_bool,
+    is_fullscreen RETURNING VALUE(r_result) TYPE abap_bool,
+    is_sapgui_html RETURNING VALUE(r_result) TYPE abap_bool,
+    is_sapgui_timeout_sufficient RETURNING VALUE(r_result) TYPE abap_bool
+                                 RAISING   lcx_error,
+    is_version_latest IMPORTING i_version       TYPE string
+                      RETURNING VALUE(r_result) TYPE abap_bool,
+    toggle_inst_modules IMPORTING i_checked TYPE abap_bool,
+    display_job_details,
+    display_job_details_statusbar,
+    fill_fullscreen_content,
+    create_container,
+    create_fullscreen,
+    draw_tree,
+    draw_columns,
+    draw_nodes,
+    draw_node_abapsdk_core,
+    draw_node_installed_modules,
+    draw_node_available_modules,
+    draw_header,
+    draw_footer,
+    delete_nodes,
+    refresh RAISING lcx_error,
+    refresh_nodes,
+    refresh_buttons,
+    set_handlers,
+    set_settings,
+    set_functions,
+    check_abapsdk_zipfiles_present
+      IMPORTING i_version       TYPE string DEFAULT 'LATEST'
+      RETURNING VALUE(r_result) TYPE abap_bool
+      RAISING   lcx_error,
+    check_abapsdk_zipfiles_current
+      RETURNING VALUE(r_result) TYPE abap_bool
+      RAISING   lcx_error,
+    check_selection_sanity
+      IMPORTING it_modules_tbi  TYPE tt_abapsdk_tla
+                it_modules_tbd  TYPE tt_abapsdk_tla
+                i_op            TYPE string
+                i_salv_function TYPE syst_ucomm
+      RETURNING VALUE(r_result) TYPE abap_bool
+      RAISING   lcx_error,
+    check_selection_mod_thresholds IMPORTING it_modules_tbi  TYPE tt_abapsdk_tla
+                                             it_modules_tbd  TYPE tt_abapsdk_tla
+                                             i_op            TYPE string
+                                             i_salv_function TYPE syst_ucomm
+                                   RETURNING VALUE(r_result) TYPE abap_bool
                                    RAISING   lcx_error,
-      is_version_latest IMPORTING i_version       TYPE string
-                        RETURNING VALUE(r_result) TYPE abap_bool,
-      toggle_inst_modules IMPORTING i_checked TYPE abap_bool,
-      display_job_details,
-      display_job_details_statusbar,
-      fill_fullscreen_content,
-      create_container,
-      create_fullscreen,
-      draw_tree,
-      draw_columns,
-      draw_nodes,
-      draw_node_abapsdk_core,
-      draw_node_installed_modules,
-      draw_node_available_modules,
-      draw_header,
-      draw_footer,
-      delete_nodes,
-      refresh RAISING lcx_error,
-      refresh_nodes,
-      refresh_buttons,
-      set_handlers,
-      set_settings,
-      set_functions,
-      check_abapsdk_zipfiles_present
-        IMPORTING i_version       TYPE string DEFAULT 'LATEST'
-        RETURNING VALUE(r_result) TYPE abap_bool
-        RAISING   lcx_error,
-      check_abapsdk_zipfiles_current
-        RETURNING VALUE(r_result) TYPE abap_bool
-        RAISING   lcx_error,
-      check_selection_sanity
-        IMPORTING it_modules_tbi  TYPE tt_abapsdk_tla
-                  it_modules_tbd  TYPE tt_abapsdk_tla
-                  i_op            TYPE string
-                  i_salv_function TYPE syst_ucomm
-        RETURNING VALUE(r_result) TYPE abap_bool
-        RAISING   lcx_error,
-      check_selection_mod_thresholds IMPORTING it_modules_tbi  TYPE tt_abapsdk_tla
-                                               it_modules_tbd  TYPE tt_abapsdk_tla
-                                               i_op            TYPE string
-                                               i_salv_function TYPE syst_ucomm
-                                     RETURNING VALUE(r_result) TYPE abap_bool
-                                     RAISING   lcx_error,
-      check_selection_core_validity IMPORTING it_modules_tbi  TYPE tt_abapsdk_tla
-                                              it_modules_tbd  TYPE tt_abapsdk_tla
-                                              i_op            TYPE string
-                                              i_salv_function TYPE syst_ucomm
-                                    RETURNING VALUE(r_result) TYPE abap_bool,
-      check_selection_populated IMPORTING it_modules_tbi  TYPE tt_abapsdk_tla
-                                          it_modules_tbd  TYPE tt_abapsdk_tla
-                                          i_op            TYPE string
-                                          i_salv_function TYPE syst_ucomm
-                                RETURNING VALUE(r_result) TYPE abap_bool,
-      handle_user_command FOR EVENT added_function OF cl_salv_events_tree IMPORTING e_salv_function ,
-      handle_checkbox_changed  FOR EVENT checkbox_change OF cl_salv_events_tree IMPORTING node_key columnname checked,
-      handle_double_click FOR EVENT double_click OF cl_salv_events_tree IMPORTING node_key columnname,
-      handle_on_close FOR EVENT close OF cl_gui_dialogbox_container IMPORTING sender.
+    check_selection_core_validity IMPORTING it_modules_tbi  TYPE tt_abapsdk_tla
+                                            it_modules_tbd  TYPE tt_abapsdk_tla
+                                            i_op            TYPE string
+                                            i_salv_function TYPE syst_ucomm
+                                  RETURNING VALUE(r_result) TYPE abap_bool,
+    check_selection_populated IMPORTING it_modules_tbi  TYPE tt_abapsdk_tla
+                                        it_modules_tbd  TYPE tt_abapsdk_tla
+                                        i_op            TYPE string
+                                        i_salv_function TYPE syst_ucomm
+                              RETURNING VALUE(r_result) TYPE abap_bool,
+    handle_user_command FOR EVENT added_function OF cl_salv_events_tree IMPORTING e_salv_function ,
+    handle_checkbox_changed  FOR EVENT checkbox_change OF cl_salv_events_tree IMPORTING node_key columnname checked,
+    handle_double_click FOR EVENT double_click OF cl_salv_events_tree IMPORTING node_key columnname,
+    handle_on_close FOR EVENT close OF cl_gui_dialogbox_container IMPORTING sender.
 
 
-  PROTECTED SECTION.
-  PRIVATE SECTION.
+PROTECTED SECTION.
+PRIVATE SECTION.
 
 ENDCLASS.
 
@@ -2281,20 +2306,20 @@ ENDCLASS.
 
 CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 
-  METHOD constructor.
+METHOD constructor.
 
-    mr_abapsdk_package_manager = ir_abapsdk_package_manager.
+  mr_abapsdk_package_manager = ir_abapsdk_package_manager.
 
-    mt_installed_modules = mr_abapsdk_package_manager->get_abapsdk_installed_modules( ).
+  mt_installed_modules = mr_abapsdk_package_manager->get_abapsdk_installed_modules( ).
 
-    mt_available_modules_inst = mr_abapsdk_package_manager->get_abapsdk_avail_modules_json( i_operation = 'install'
+  mt_available_modules_inst = mr_abapsdk_package_manager->get_abapsdk_avail_modules_json( i_operation = 'install'
+                                                                                          i_source    = 'web'
+                                                                                          i_version   = 'LATEST' ).
+  mt_available_modules_uninst = mr_abapsdk_package_manager->get_abapsdk_avail_modules_json( i_operation = 'uninstall'
                                                                                             i_source    = 'web'
                                                                                             i_version   = 'LATEST' ).
-    mt_available_modules_uninst = mr_abapsdk_package_manager->get_abapsdk_avail_modules_json( i_operation = 'uninstall'
-                                                                                              i_source    = 'web'
-                                                                                              i_version   = 'LATEST' ).
 
-    SELECT tla FROM @mt_available_modules_inst AS am WHERE is_popular = 'X' INTO TABLE @mt_popular_modules .
+  SELECT tla FROM @mt_available_modules_inst AS am WHERE is_popular = 'X' INTO TABLE @mt_popular_modules .
 
     " re-hydrate the module staging area if report is restarted
     IMPORT st_modules_to_be_installed = mt_modules_to_be_installed FROM SHARED BUFFER indx(mi) ID 'MOD_INST'.
@@ -2663,7 +2688,7 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
     " TODO: returning the no of modules (installed, available) should go into a dedicated function.
     DATA(l_inst_mod_no) = lines( mt_installed_modules ).
     IF l_inst_mod_no >= 4.
-      l_inst_mod_no = l_inst_mod_no - 4.
+      l_inst_mod_no = l_inst_mod_no - 3.
     ENDIF.
 
     DATA(l_installed_modules_text) = 'Installed ABAP SDK Modules (' && l_inst_mod_no && ')' ##NO_TEXT.
@@ -2815,7 +2840,13 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 
     lr_nodes = mr_tree->get_nodes( ).
 
-    DATA(l_avail_modules_no) = lines( mt_available_modules_inst ) - lines( mt_installed_modules ).
+    DATA(l_inst_mod_no) = lines( mt_installed_modules ).
+    IF l_inst_mod_no >= 4.
+      l_inst_mod_no = l_inst_mod_no - 3.
+    ENDIF.
+    DATA(l_inst_deprecated_mod_ins_no) = lines( mr_abapsdk_package_manager->get_abapsdk_deprecated_mod_ins( ) ).
+    DATA(l_avail_modules_no) = lines( mt_available_modules_inst ) - ( l_inst_mod_no - l_inst_deprecated_mod_ins_no ).
+
     IF lines( mt_installed_modules ) = 0.
       l_avail_modules_no = l_avail_modules_no - 4.
     ENDIF.
@@ -4639,20 +4670,20 @@ ENDCLASS.
 
 
 CLASS lcl_main DEFINITION FINAL.
-  PUBLIC SECTION.
-    METHODS
-      main RAISING lcx_error.
+PUBLIC SECTION.
+  METHODS
+    main RAISING lcx_error.
 ENDCLASS.
 
 CLASS lcl_main IMPLEMENTATION.
-  METHOD main.
-    IF sy-batch = abap_true.
-      DATA(abapsdk_pm_batch) = NEW lcl_abapsdk_package_manager( i_batch_mode = sy-batch ).
-    ELSE.
-      DATA(abapsdk_pm) = NEW lcl_abapsdk_package_manager( ).
-      DATA(abapsdk_pm_tc) = NEW lcl_abapsdk_pm_tree_controller( ir_abapsdk_package_manager = abapsdk_pm ).
-    ENDIF.
-  ENDMETHOD.
+METHOD main.
+  IF sy-batch = abap_true.
+    DATA(abapsdk_pm_batch) = NEW lcl_abapsdk_package_manager( i_batch_mode = sy-batch ).
+  ELSE.
+    DATA(abapsdk_pm) = NEW lcl_abapsdk_package_manager( ).
+    DATA(abapsdk_pm_tc) = NEW lcl_abapsdk_pm_tree_controller( ir_abapsdk_package_manager = abapsdk_pm ).
+  ENDIF.
+ENDMETHOD.
 ENDCLASS.
 
 
