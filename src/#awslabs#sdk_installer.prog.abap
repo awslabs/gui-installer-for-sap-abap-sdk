@@ -4571,7 +4571,7 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 *                                                                        i_modules_to_be_deleted   = mt_modules_to_be_deleted
 *                                                                        i_target_version          = lv_target_version ).
 
-            DATA(lv_text) = |Having all modules installed is discouraged and should only be done in demo systems. |
+            DATA(lv_text) = |Installing all modules is discouraged and should only be done in demo systems. |
                    && |Continue? | ##NO_TEXT.
 
             DATA: lv_answer TYPE string.
