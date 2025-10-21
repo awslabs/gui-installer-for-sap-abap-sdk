@@ -21,7 +21,7 @@ The report can also be deployed and executed on an SAP RISE system under the fol
 - For any Git-based installation (i.e. non copy/paste), the SAP RISE system needs to able to connect to [github.com](github.com)
 - To download the ABAP SDK, connectivity form SAP RISE to [aws.amazon.com](aws.amazon.com) is required
 - Amazon SSL certificates needed for connectivty have to be downloadable from [amazontrust.com](amazontrust.com)
-- OPTIONAL: If Internet access from the SAP RISE system is happening via a proxy, the SAP RISE system’s ICM has to be configured accordingly and the above-mentioned sites need to be allow-listed on the respective proxy. At the time of this writing, they are not part of the standard allow list of a proxy shipped with a SAP RISE environment.
+- <b>OPTIONAL</b>: If Internet access from the SAP RISE system is happening via a proxy, the SAP RISE system’s ICM has to be configured accordingly and the above-mentioned sites need to be allow-listed on the respective proxy. At the time of this writing, they are not part of the standard allow list of a proxy shipped with a SAP RISE environment.
 
 ## How to use 
 
@@ -30,6 +30,7 @@ Create a new report in ADT / SE80 / SE38 on an SAP system where you want to use 
 ## Current limitations
 - Only supports NetWeaver 7.4 and higher based SAP systems (same [prerequisite](https://docs.aws.amazon.com/sdk-for-sapabap/latest/developer-guide/prerequisites.html#sdk) as the AWS SDK for SAP ABAP)
 - Needs the SAP system to have a working Internet connection for downloading ABAP SDK .json and .zip files
+- Needs some disk space for the ABAP SDK .zip files on the SAP system's filesystem
 - Currently needs manual updating by copy/pasting the latest version
 - No support for the [BTP edition of the AWS SDK for SAP ABAP](https://docs.aws.amazon.com/sdk-for-sapabap/latest/developer-guide/installation-btp.html), yet
 
