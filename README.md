@@ -1,4 +1,4 @@
-## GUI installer for the AWS SDK for SAP ABAP
+# GUI installer for the AWS SDK for SAP ABAP
 
 Latest: [/awslabs/sdk_installer.prog.abap](https://github.com/awslabs/gui-installer-for-abap-sdk/blob/main/src/%23awslabs%23sdk_installer.prog.abap)
 
@@ -13,6 +13,15 @@ This project is about creating a standalone SAP ABAP report for streamlining the
 - Check on individual modules' transport logs, object lists, and respective API documentation
 
 ![image](https://github.com/user-attachments/assets/35213190-76c5-4319-ab64-3094170b67ca)
+
+## Deploying on SAP RISE
+
+The report can also be deployed and executed on an SAP RISE system under the following pre-requisites:
+
+- For any Git-based installation (i.e. non copy/paste), the SAP RISE system needs to able to connect to [github.com](github.com)
+- To download the ABAP SDK, connectivity form SAP RISE to [aws.amazon.com](aws.amazon.com) is required
+- Amazon SSL certificates needed for connectivty have to be downloadable from [amazontrust.com](amazontrust.com)
+- OPTIONAL: If Internet access from the SAP RISE system is happening via a proxy, the SAP RISE system’s ICM has to be configured accordingly and the above-mentioned sites need to be allow-listed on the respective proxy. At the time of this writing, they are not part of the standard allow list of a proxy shipped with a SAP RISE environment.
 
 ## How to use 
 
