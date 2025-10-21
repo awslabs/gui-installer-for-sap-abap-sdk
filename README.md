@@ -1,6 +1,9 @@
 # GUI installer for the AWS SDK for SAP ABAP
 
-Latest: [/awslabs/sdk_installer.prog.abap](https://github.com/awslabs/gui-installer-for-abap-sdk/blob/main/src/%23awslabs%23sdk_installer.prog.abap)
+Latest: [/AWSLABS/SDK_INSTALLER.prog.abap](https://github.com/awslabs/gui-installer-for-abap-sdk/blob/main/src/%23awslabs%23sdk_installer.prog.abap)
+
+Raw: [/AWSLABS/SDK_INSTALLER.prog.abap](https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/%23awslabs%23sdk_installer.prog.abap)
+
 
 This project is about creating a standalone SAP ABAP report for streamlining the installation and maintenance of the [AWS SDK for SAP ABAP](https://docs.aws.amazon.com/sdk-for-sapabap/latest/developer-guide/home.html). In order to provide a plug 'n' play experience, the report was designed to be installed on compatible ABAP-based system via simply <b>copying & pasting</b> the latest version into a corresponding report on a user's SAP system. The report offers a graphical user interface and automation functions, which help with:
 
