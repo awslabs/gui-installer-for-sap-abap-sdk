@@ -24,10 +24,15 @@
 
 REPORT /awslabs/sdk_installer.
 
+INTERFACE lif_internet_manager DEFERRED.
+
+
+CLASS lcl_internet_manager DEFINITION DEFERRED.
 CLASS lcl_abapsdk_package_manager DEFINITION DEFERRED.
 CLASS lcl_abapsdk_pm_tree_controller DEFINITION DEFERRED.
 CLASS lcx_error DEFINITION DEFERRED.
 CLASS lcl_main DEFINITION DEFERRED.
+
 
 
 TYPES: BEGIN OF ts_abapsdk_module,
@@ -100,6 +105,143 @@ CLASS lcx_error IMPLEMENTATION.
 ENDCLASS.
 
 
+
+INTERFACE lif_internet_manager.
+
+  CONSTANTS: c_url_internet_check TYPE w3_url VALUE 'http://ocsp.r2m02.amazontrust.com'.
+
+  METHODS:
+    download IMPORTING i_absolute_uri         TYPE w3_url
+                       i_blankstocrlf         TYPE boolean
+             RETURNING VALUE(r_response_body) TYPE xstring
+             RAISING   lcx_error,
+    has_internet_access
+      RETURNING VALUE(r_result) TYPE abap_bool
+      RAISING   lcx_error.
+
+ENDINTERFACE.
+
+
+
+
+
+CLASS lcl_internet_manager DEFINITION.
+
+  PUBLIC SECTION.
+    INTERFACES: lif_internet_manager.
+
+ENDCLASS.
+
+CLASS lcl_internet_manager IMPLEMENTATION.
+
+  METHOD lif_internet_manager~download.
+
+    DATA l_status_code TYPE i.
+    DATA l_status_text TYPE string.
+    DATA l_response_entity_body_length TYPE i.
+
+    DATA lt_request_entity_body TYPE STANDARD TABLE OF docs.
+    DATA lt_request_headers TYPE STANDARD TABLE OF docs.
+    DATA lt_response_entity_body TYPE STANDARD TABLE OF docs.
+    DATA lt_response_headers TYPE STANDARD TABLE OF docs.
+
+    DATA wa_response_entity_body TYPE docs.
+
+
+    cl_http_client=>create_by_url( EXPORTING url = CONV string( i_absolute_uri )
+                                             ssl_id = 'DFAULT'  " use SSLC
+                                   IMPORTING client = DATA(lr_http_client) ).
+    lr_http_client->request->set_method( if_http_request=>co_request_method_get ).
+    lr_http_client->send( EXPORTING  timeout                    = if_http_client=>co_timeout_default
+                          EXCEPTIONS http_communication_failure = 1
+                                     http_invalid_state         = 2
+                                     http_processing_failed     = 3
+                                     http_invalid_timeout       = 4
+                                     OTHERS                     = 99 ).
+    IF sy-subrc = 0.
+
+      lr_http_client->receive( EXCEPTIONS http_communication_failure = 1
+                                          http_invalid_state         = 2
+                                          http_processing_failed     = 3
+                                          OTHERS                     = 99 ).
+    ENDIF.
+    IF sy-subrc > 0.
+      CASE sy-subrc.
+        WHEN 1.
+          DATA(lv_msg) = |HTTP communication error|.
+        WHEN 2.
+          lv_msg = |HTTP invalid state|.
+        WHEN 3.
+          lv_msg = |HTTP processing failed|.
+        WHEN 4.
+          lv_msg = |HTTP invalid timeout|.
+        WHEN OTHERS.
+          lv_msg = |Unknown error|.
+      ENDCASE.
+      RAISE EXCEPTION TYPE lcx_error
+        EXPORTING
+          iv_msg = |Could not establish a connection to { i_absolute_uri }:| &&
+                   lv_msg && |Please check the SMICM trace for more details.| ##NO_TEXT.
+    ENDIF.
+
+
+    DATA(lo_response) = lr_http_client->response.
+    lo_response->get_status( IMPORTING code = l_status_code reason = l_status_text ).
+    r_response_body = lo_response->get_data( ).
+
+    IF l_status_code >= 299.
+      RAISE EXCEPTION TYPE lcx_error
+        EXPORTING
+          iv_msg = |HTTP error { l_status_text }({ l_status_code }) when attempting GET from { i_absolute_uri }.| &&
+                   |Please check the SMICM log for SSL errors such as untrusted certificates| ##NO_TEXT.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD lif_internet_manager~has_internet_access.
+
+    DATA lv_result TYPE abap_bool.
+    DATA lr_http_client TYPE REF TO if_http_client.
+    DATA lv_reason TYPE string.
+    DATA lv_url TYPE string.
+    DATA lv_http_rc TYPE i.
+    DATA lv_status_text TYPE string.
+
+    lv_result = abap_false.
+
+    lv_url = lif_internet_manager~c_url_internet_check.
+
+    TRY.
+        cl_http_client=>create_by_url( EXPORTING url = lv_url IMPORTING client = lr_http_client ).
+
+        lr_http_client->request->set_method( if_http_request=>co_request_method_get ).
+
+        lr_http_client->send( timeout = if_http_client=>co_timeout_default ).
+
+        lr_http_client->receive( EXCEPTIONS http_communication_failure = 1
+                                            http_invalid_state         = 2
+                                            http_processing_failed     = 3
+                                            OTHERS                     = 4 ).
+
+        IF sy-subrc <> 0.
+          lv_result = abap_false.
+        ELSE.
+          lv_result = abap_true.
+        ENDIF.
+
+      CATCH cx_root INTO DATA(r_ex).
+        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = r_ex->get_text( ).
+    ENDTRY.
+
+    r_result = lv_result.
+  ENDMETHOD.
+
+ENDCLASS.
+
+
+
+
+
 CLASS lcl_abapsdk_package_manager DEFINITION FINAL FRIENDS lcl_abapsdk_pm_tree_controller.
 
 
@@ -128,10 +270,6 @@ CLASS lcl_abapsdk_package_manager DEFINITION FINAL FRIENDS lcl_abapsdk_pm_tree_c
     METHODS:
       constructor IMPORTING i_batch_mode TYPE syst-batch OPTIONAL
                   RAISING   lcx_error,
-      download IMPORTING i_absolute_uri         TYPE w3_url
-                         i_blankstocrlf         TYPE boolean
-               RETURNING VALUE(r_response_body) TYPE xstring
-               RAISING   lcx_error,
       set_amazon_root_cert_values,
       set_amazon_root_cert_status RAISING lcx_error,
       install_amazon_root_certs RETURNING VALUE(r_success) TYPE abap_bool RAISING lcx_error,
@@ -233,9 +371,6 @@ CLASS lcl_abapsdk_package_manager DEFINITION FINAL FRIENDS lcl_abapsdk_pm_tree_c
       check_abapsdk_zipfiles_current
         RETURNING VALUE(r_result) TYPE abap_bool
         RAISING   lcx_error,
-      has_internet_access
-        RETURNING VALUE(r_result) TYPE abap_bool
-        RAISING   lcx_error,
       update_abapsdk_zipfile_paths,
       has_prod_client RETURNING VALUE(r_result) TYPE abap_bool.
 
@@ -244,6 +379,9 @@ CLASS lcl_abapsdk_package_manager DEFINITION FINAL FRIENDS lcl_abapsdk_pm_tree_c
   PROTECTED SECTION.
 
   PRIVATE SECTION.
+
+    DATA: internet_manager TYPE REF TO lif_internet_manager.
+
     CONSTANTS c_trans_logical_path TYPE filepath-pathintern VALUE 'ASSEMBLY'.
     CONSTANTS c_logsubdir_name TYPE fileintern VALUE 'BC_RSTEXTA3'.
     CONSTANTS c_download_uri_prefix TYPE string VALUE '://sdk-for-sapabap.aws.amazon.com/awsSdkSapabapV'.
@@ -370,6 +508,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
       MESSAGE |System has at least one productive client, please use TMS.| TYPE 'A' ##NO_TEXT.
     ENDIF.
 
+    internet_manager = NEW lcl_internet_manager( ).
 
 
     DATA wa_zipfile_inst TYPE ts_abapsdk_zip.
@@ -420,7 +559,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
     set_amazon_root_cert_status( ).
 
     TRY.
-        IF has_internet_access( ) = abap_false.
+        IF internet_manager->has_internet_access( ) = abap_false.
           MESSAGE |This report requires HTTP(S) Internet access, please enable before usage.| TYPE 'A' ##NO_TEXT.
         ENDIF.
       CATCH lcx_error INTO DATA(r_error).
@@ -504,7 +643,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
       DATA(root_cert_name_http) = segment( val   = wa_amazon_root_cert-uri
                                            sep   = '/'
                                            index = -1 ).
-      wa_amazon_root_cert-binary = me->download( i_absolute_uri = wa_amazon_root_cert-uri
+      wa_amazon_root_cert-binary = internet_manager->download( i_absolute_uri = wa_amazon_root_cert-uri
                                                  i_blankstocrlf = abap_false ).
 
 
@@ -538,7 +677,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
       DATA(root_cert_name_https) = segment( val   = wa_amazon_root_cert-uri
                                             sep   = '/'
                                             index = -1 ).
-      wa_amazon_root_cert-binary = me->download( i_absolute_uri = wa_amazon_root_cert-uri
+      wa_amazon_root_cert-binary = internet_manager->download( i_absolute_uri = wa_amazon_root_cert-uri
                                                  i_blankstocrlf = abap_false ).
 
 
@@ -758,70 +897,6 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
 
   ENDMETHOD.
 
-
-  METHOD download.
-
-    DATA l_status_code TYPE i.
-    DATA l_status_text TYPE string.
-    DATA l_response_entity_body_length TYPE i.
-
-    DATA lt_request_entity_body TYPE STANDARD TABLE OF docs.
-    DATA lt_request_headers TYPE STANDARD TABLE OF docs.
-    DATA lt_response_entity_body TYPE STANDARD TABLE OF docs.
-    DATA lt_response_headers TYPE STANDARD TABLE OF docs.
-
-    DATA wa_response_entity_body TYPE docs.
-
-
-    cl_http_client=>create_by_url( EXPORTING url = CONV string( i_absolute_uri )
-                                             ssl_id = 'DFAULT'  " use SSLC
-                                   IMPORTING client = DATA(lr_http_client) ).
-    lr_http_client->request->set_method( if_http_request=>co_request_method_get ).
-    lr_http_client->send( EXPORTING  timeout                    = if_http_client=>co_timeout_default
-                          EXCEPTIONS http_communication_failure = 1
-                                     http_invalid_state         = 2
-                                     http_processing_failed     = 3
-                                     http_invalid_timeout       = 4
-                                     OTHERS                     = 99 ).
-    IF sy-subrc = 0.
-
-      lr_http_client->receive( EXCEPTIONS http_communication_failure = 1
-                                          http_invalid_state         = 2
-                                          http_processing_failed     = 3
-                                          OTHERS                     = 99 ).
-    ENDIF.
-    IF sy-subrc > 0.
-      CASE sy-subrc.
-        WHEN 1.
-          DATA(lv_msg) = |HTTP communication error|.
-        WHEN 2.
-          lv_msg = |HTTP invalid state|.
-        WHEN 3.
-          lv_msg = |HTTP processing failed|.
-        WHEN 4.
-          lv_msg = |HTTP invalid timeout|.
-        WHEN OTHERS.
-          lv_msg = |Unknown error|.
-      ENDCASE.
-      RAISE EXCEPTION TYPE lcx_error
-        EXPORTING
-          iv_msg = |Could not establish a connection to { i_absolute_uri }:| &&
-                   lv_msg && |Please check the SMICM trace for more details.| ##NO_TEXT.
-    ENDIF.
-
-
-    DATA(lo_response) = lr_http_client->response.
-    lo_response->get_status( IMPORTING code = l_status_code reason = l_status_text ).
-    r_response_body = lo_response->get_data( ).
-
-    IF l_status_code >= 299.
-      RAISE EXCEPTION TYPE lcx_error
-        EXPORTING
-          iv_msg = |HTTP error { l_status_text }({ l_status_code }) when attempting GET from { i_absolute_uri }.| &&
-                   |Please check the SMICM log for SSL errors such as untrusted certificates| ##NO_TEXT.
-    ENDIF.
-
-  ENDMETHOD.
 
   METHOD get_abapsdk_installed_modules.
 
@@ -1081,7 +1156,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
     CASE i_source.
       WHEN 'web'.
 
-        DATA(l_jsonx) = me->download( i_absolute_uri = mt_abapsdk_zipfiles[ op = i_operation version = i_version ]-json_web
+        DATA(l_jsonx) = internet_manager->download( i_absolute_uri = mt_abapsdk_zipfiles[ op = i_operation version = i_version ]-json_web
                                       i_blankstocrlf = abap_false ).
 
 
@@ -1709,45 +1784,6 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD has_internet_access.
-
-    DATA lv_result TYPE abap_bool.
-    DATA lr_http_client TYPE REF TO if_http_client.
-    DATA lv_reason TYPE string.
-    DATA lv_url TYPE string.
-    DATA lv_http_rc TYPE i.
-    DATA lv_status_text TYPE string.
-
-    lv_result = abap_false.
-
-    lv_url = 'http://ocsp.r2m02.amazontrust.com'.
-
-    TRY.
-        cl_http_client=>create_by_url( EXPORTING url = lv_url IMPORTING client = lr_http_client ).
-
-        lr_http_client->request->set_method( if_http_request=>co_request_method_get ).
-
-        lr_http_client->send( timeout = if_http_client=>co_timeout_default ).
-
-        lr_http_client->receive( EXCEPTIONS http_communication_failure = 1
-                                            http_invalid_state         = 2
-                                            http_processing_failed     = 3
-                                            OTHERS                     = 4 ).
-
-        IF sy-subrc <> 0.
-          lv_result = abap_false.
-        ELSE.
-          lv_result = abap_true.
-        ENDIF.
-
-      CATCH cx_root INTO DATA(r_ex).
-        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = r_ex->get_text( ).
-    ENDTRY.
-
-    r_result = lv_result.
-
-  ENDMETHOD.
-
 
   METHOD run_foreground.
 
@@ -2199,7 +2235,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
                                                 i_total              = lines( lt_abapsdk_zipfiles )
                                                 i_output_immediately = abap_true ) ##NO_TEXT.
 
-      DATA(e_zipfile_blob) = me->download( i_absolute_uri = <fs_abapsdk_zipfile>-uri
+      DATA(e_zipfile_blob) = internet_manager->download( i_absolute_uri = <fs_abapsdk_zipfile>-uri
                                            i_blankstocrlf = abap_false ).
 
 
