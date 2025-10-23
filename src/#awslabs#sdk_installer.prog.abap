@@ -25,9 +25,10 @@
 REPORT /awslabs/sdk_installer.
 
 INTERFACE lif_internet_manager DEFERRED.
-
+INTERFACE lif_report_update_manager DEFERRED.
 
 CLASS lcl_internet_manager DEFINITION DEFERRED.
+CLASS lcl_report_update_manager DEFINITION DEFERRED.
 CLASS lcl_abapsdk_package_manager DEFINITION DEFERRED.
 CLASS lcl_abapsdk_pm_tree_controller DEFINITION DEFERRED.
 CLASS lcx_error DEFINITION DEFERRED.
@@ -122,9 +123,6 @@ INTERFACE lif_internet_manager.
 ENDINTERFACE.
 
 
-
-
-
 CLASS lcl_internet_manager DEFINITION.
 
   PUBLIC SECTION.
@@ -136,63 +134,63 @@ CLASS lcl_internet_manager IMPLEMENTATION.
 
   METHOD lif_internet_manager~download.
 
-    DATA l_status_code TYPE i.
-    DATA l_status_text TYPE string.
-    DATA l_response_entity_body_length TYPE i.
+    DATA status_code TYPE i.
+    DATA status_text TYPE string.
+    DATA response_entity_body_length TYPE i.
 
-    DATA lt_request_entity_body TYPE STANDARD TABLE OF docs.
-    DATA lt_request_headers TYPE STANDARD TABLE OF docs.
-    DATA lt_response_entity_body TYPE STANDARD TABLE OF docs.
-    DATA lt_response_headers TYPE STANDARD TABLE OF docs.
+    DATA request_entity_body TYPE STANDARD TABLE OF docs.
+    DATA request_headers TYPE STANDARD TABLE OF docs.
+    DATA response_entity_body TYPE STANDARD TABLE OF docs.
+    DATA response_headers TYPE STANDARD TABLE OF docs.
 
     DATA wa_response_entity_body TYPE docs.
 
 
     cl_http_client=>create_by_url( EXPORTING url = CONV string( i_absolute_uri )
                                              ssl_id = 'DFAULT'  " use SSLC
-                                   IMPORTING client = DATA(lr_http_client) ).
-    lr_http_client->request->set_method( if_http_request=>co_request_method_get ).
-    lr_http_client->send( EXPORTING  timeout                    = if_http_client=>co_timeout_default
-                          EXCEPTIONS http_communication_failure = 1
-                                     http_invalid_state         = 2
-                                     http_processing_failed     = 3
-                                     http_invalid_timeout       = 4
-                                     OTHERS                     = 99 ).
+                                   IMPORTING client = DATA(http_client) ).
+    http_client->request->set_method( if_http_request=>co_request_method_get ).
+    http_client->send( EXPORTING  timeout                    = if_http_client=>co_timeout_default
+                       EXCEPTIONS http_communication_failure = 1
+                                  http_invalid_state         = 2
+                                  http_processing_failed     = 3
+                                  http_invalid_timeout       = 4
+                                  OTHERS                     = 99 ).
     IF sy-subrc = 0.
 
-      lr_http_client->receive( EXCEPTIONS http_communication_failure = 1
-                                          http_invalid_state         = 2
-                                          http_processing_failed     = 3
-                                          OTHERS                     = 99 ).
+      http_client->receive( EXCEPTIONS http_communication_failure = 1
+                                       http_invalid_state         = 2
+                                       http_processing_failed     = 3
+                                       OTHERS                     = 99 ).
     ENDIF.
     IF sy-subrc > 0.
       CASE sy-subrc.
         WHEN 1.
-          DATA(lv_msg) = |HTTP communication error|.
+          DATA(msg) = |HTTP communication error|.
         WHEN 2.
-          lv_msg = |HTTP invalid state|.
+          msg = |HTTP invalid state|.
         WHEN 3.
-          lv_msg = |HTTP processing failed|.
+          msg = |HTTP processing failed|.
         WHEN 4.
-          lv_msg = |HTTP invalid timeout|.
+          msg = |HTTP invalid timeout|.
         WHEN OTHERS.
-          lv_msg = |Unknown error|.
+          msg = |Unknown error|.
       ENDCASE.
       RAISE EXCEPTION TYPE lcx_error
         EXPORTING
           iv_msg = |Could not establish a connection to { i_absolute_uri }:| &&
-                   lv_msg && |Please check the SMICM trace for more details.| ##NO_TEXT.
+                   msg && |Please check the SMICM trace for more details.| ##NO_TEXT.
     ENDIF.
 
 
-    DATA(lo_response) = lr_http_client->response.
-    lo_response->get_status( IMPORTING code = l_status_code reason = l_status_text ).
-    r_response_body = lo_response->get_data( ).
+    DATA(response) = http_client->response.
+    response->get_status( IMPORTING code = status_code reason = status_text ).
+    r_response_body = response->get_data( ).
 
-    IF l_status_code >= 299.
+    IF status_code >= 299.
       RAISE EXCEPTION TYPE lcx_error
         EXPORTING
-          iv_msg = |HTTP error { l_status_text }({ l_status_code }) when attempting GET from { i_absolute_uri }.| &&
+          iv_msg = |HTTP error { status_text }({ status_code }) when attempting GET from { i_absolute_uri }.| &&
                    |Please check the SMICM log for SSL errors such as untrusted certificates| ##NO_TEXT.
     ENDIF.
 
@@ -200,44 +198,162 @@ CLASS lcl_internet_manager IMPLEMENTATION.
 
   METHOD lif_internet_manager~has_internet_access.
 
-    DATA lv_result TYPE abap_bool.
-    DATA lr_http_client TYPE REF TO if_http_client.
-    DATA lv_reason TYPE string.
-    DATA lv_url TYPE string.
-    DATA lv_http_rc TYPE i.
-    DATA lv_status_text TYPE string.
+    DATA result TYPE abap_bool.
+    DATA http_client TYPE REF TO if_http_client.
+    DATA reason TYPE string.
+    DATA url TYPE string.
+    DATA http_rc TYPE i.
+    DATA status_text TYPE string.
 
-    lv_result = abap_false.
+    result = abap_false.
 
-    lv_url = lif_internet_manager~c_url_internet_check.
+    url = lif_internet_manager~c_url_internet_check.
 
     TRY.
-        cl_http_client=>create_by_url( EXPORTING url = lv_url IMPORTING client = lr_http_client ).
+        cl_http_client=>create_by_url( EXPORTING url = url IMPORTING client = http_client ).
 
-        lr_http_client->request->set_method( if_http_request=>co_request_method_get ).
+        http_client->request->set_method( if_http_request=>co_request_method_get ).
 
-        lr_http_client->send( timeout = if_http_client=>co_timeout_default ).
+        http_client->send( timeout = if_http_client=>co_timeout_default ).
 
-        lr_http_client->receive( EXCEPTIONS http_communication_failure = 1
-                                            http_invalid_state         = 2
-                                            http_processing_failed     = 3
-                                            OTHERS                     = 4 ).
+        http_client->receive( EXCEPTIONS http_communication_failure = 1
+                                         http_invalid_state         = 2
+                                         http_processing_failed     = 3
+                                         OTHERS                     = 4 ).
 
         IF sy-subrc <> 0.
-          lv_result = abap_false.
+          result = abap_false.
         ELSE.
-          lv_result = abap_true.
+          result = abap_true.
         ENDIF.
 
-      CATCH cx_root INTO DATA(r_ex).
-        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = r_ex->get_text( ).
+      CATCH cx_root INTO DATA(ex).
+        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = ex->get_text( ).
     ENDTRY.
 
-    r_result = lv_result.
+    r_result = result.
   ENDMETHOD.
 
 ENDCLASS.
 
+
+
+
+INTERFACE lif_report_update_manager.
+
+  CONSTANTS: c_url_github_raw TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/%23awslabs%23sdk_installer.prog.abap'.
+
+  METHODS:
+    is_update_available RETURNING VALUE(r_result) TYPE boolean
+                        RAISING   lcx_error,
+    update_report RAISING lcx_error.
+
+ENDINTERFACE.
+
+
+CLASS lcl_report_update_manager DEFINITION.
+
+  PUBLIC SECTION.
+    INTERFACES: lif_report_update_manager.
+
+    METHODS:
+      constructor IMPORTING i_internet_manager TYPE REF TO lif_internet_manager OPTIONAL.
+
+  PRIVATE SECTION.
+    DATA: internet_manager TYPE REF TO lif_internet_manager.
+    DATA: report_github_cached TYPE xstring.
+
+    METHODS:
+      download_report IMPORTING i_url_github_raw        TYPE w3_url
+                      RETURNING VALUE(r_report_xstring) TYPE xstring
+                      RAISING   lcx_error,
+      write_report_update RAISING   lcx_error.
+
+ENDCLASS.
+
+
+CLASS lcl_report_update_manager IMPLEMENTATION.
+
+
+  METHOD constructor.
+    IF i_internet_manager IS BOUND.
+      internet_manager = i_internet_manager.
+    ELSE.
+      internet_manager = NEW lcl_internet_manager( ).
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD lif_report_update_manager~update_report.
+    IF report_github_cached IS NOT INITIAL.
+      write_report_update( ).
+    ELSE.
+      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Check for update first!| ##NO_TEXT..
+    ENDIF.
+  ENDMETHOD.
+
+
+  METHOD lif_report_update_manager~is_update_available.
+
+    DATA: report_local TYPE xstring.
+    DATA: report_local_stringtab TYPE TABLE OF string.
+    DATA: report_local_string TYPE string.
+
+    " retrieve current version from github, store it in private instance variable
+    TRY.
+        report_github_cached = download_report( i_url_github_raw = lif_report_update_manager~c_url_github_raw ).
+      CATCH lcx_error INTO DATA(ex1).
+        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = ex1->get_text( ).
+    ENDTRY.
+
+    " read local report version as xstring
+    TRY.
+        READ REPORT sy-repid INTO report_local_stringtab.
+        CONCATENATE LINES OF report_local_stringtab INTO report_local_string SEPARATED BY cl_abap_char_utilities=>newline.
+        report_local = cl_abap_conv_codepage=>create_out( )->convert( source = report_local_string ).
+      CATCH cx_root INTO DATA(ex2).
+        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = ex2->get_text( ).
+    ENDTRY.
+
+    r_result = xsdbool( report_local <> report_github_cached ).
+
+  ENDMETHOD.
+
+
+  METHOD download_report.
+    TRY.
+        r_report_xstring = internet_manager->download( i_absolute_uri = i_url_github_raw
+                                                       i_blankstocrlf = abap_false ).
+      CATCH lcx_error INTO DATA(ex).
+        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = ex->get_text( ).
+    ENDTRY.
+  ENDMETHOD.
+
+
+  METHOD write_report_update.
+
+    " Safety check, if the cached version is still initial, do not overwrite
+    IF report_github_cached IS INITIAL.
+      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Report content is empty!| ##NO_TEXT..
+    ENDIF.
+
+    TRY.
+        DATA(report_string) = cl_abap_conv_codepage=>create_in( )->convert( source = report_github_cached ).
+      CATCH cx_root INTO DATA(ex).
+        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = ex->get_text( ).
+    ENDTRY.
+
+    SPLIT report_string AT cl_abap_char_utilities=>newline INTO TABLE DATA(report_stringtab).
+
+    INSERT REPORT sy-repid FROM report_stringtab.
+
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Failed to write report update!| ##NO_TEXT..
+    ENDIF.
+
+
+  ENDMETHOD.
+
+ENDCLASS.
 
 
 
@@ -644,7 +760,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
                                            sep   = '/'
                                            index = -1 ).
       wa_amazon_root_cert-binary = internet_manager->download( i_absolute_uri = wa_amazon_root_cert-uri
-                                                 i_blankstocrlf = abap_false ).
+                                                               i_blankstocrlf = abap_false ).
 
 
       CALL FUNCTION 'SSFR_PUT_CERTIFICATE'
@@ -678,7 +794,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
                                             sep   = '/'
                                             index = -1 ).
       wa_amazon_root_cert-binary = internet_manager->download( i_absolute_uri = wa_amazon_root_cert-uri
-                                                 i_blankstocrlf = abap_false ).
+                                                               i_blankstocrlf = abap_false ).
 
 
       CALL FUNCTION 'SSFR_PUT_CERTIFICATE'
@@ -1157,7 +1273,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
       WHEN 'web'.
 
         DATA(l_jsonx) = internet_manager->download( i_absolute_uri = mt_abapsdk_zipfiles[ op = i_operation version = i_version ]-json_web
-                                      i_blankstocrlf = abap_false ).
+                                                    i_blankstocrlf = abap_false ).
 
 
       WHEN 'zip'.
@@ -2236,7 +2352,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
                                                 i_output_immediately = abap_true ) ##NO_TEXT.
 
       DATA(e_zipfile_blob) = internet_manager->download( i_absolute_uri = <fs_abapsdk_zipfile>-uri
-                                           i_blankstocrlf = abap_false ).
+                                                         i_blankstocrlf = abap_false ).
 
 
 
