@@ -31,6 +31,7 @@ CLASS lcl_internet_manager DEFINITION DEFERRED.
 CLASS lcl_report_update_manager DEFINITION DEFERRED.
 CLASS lcl_abapsdk_package_manager DEFINITION DEFERRED.
 CLASS lcl_abapsdk_pm_tree_controller DEFINITION DEFERRED.
+CLASS lcl_utils DEFINITION DEFERRED.
 CLASS lcx_error DEFINITION DEFERRED.
 CLASS lcl_main DEFINITION DEFERRED.
 
@@ -357,6 +358,103 @@ ENDCLASS.
 
 
 
+CLASS lcl_utils DEFINITION FINAL.
+
+  PUBLIC SECTION.
+
+    CLASS-METHODS:
+      cmp_version_string IMPORTING i_string1       TYPE string
+                                   i_string2       TYPE string
+                         RETURNING VALUE(r_result) TYPE i,
+      get_client_role IMPORTING i_client        TYPE mandt
+                      RETURNING VALUE(r_result) TYPE cccategory,
+      get_system_name RETURNING VALUE(r_sysnam) TYPE tmssysnam,
+      has_prod_client RETURNING VALUE(r_result) TYPE abap_bool.
+
+
+ENDCLASS.
+
+
+CLASS lcl_utils IMPLEMENTATION.
+
+
+  METHOD cmp_version_string.
+
+    IF i_string1 CO '0123456789.' AND
+       i_string2 CO '0123456789.' AND
+       i_string1 CP '*.*.*' AND
+       i_string2 CP '*.*.*'.
+      SPLIT i_string1 AT '.' INTO TABLE DATA(lt_string1).
+      SPLIT i_string2 AT '.' INTO TABLE DATA(lt_string2).
+
+      DATA(l_result) = 0.
+
+      DATA wa_string1 TYPE i.
+      DATA wa_string2 TYPE i.
+
+      DO lines( lt_string1 ) TIMES.
+
+        wa_string1 = lt_string1[ sy-index ].
+        wa_string2 = lt_string2[ sy-index ].
+
+        IF wa_string1 > wa_string2.
+          l_result = 1.
+          EXIT.
+        ELSEIF wa_string1 < wa_string2.
+          l_result = -1.
+          EXIT.
+        ELSE.
+          l_result = 0.
+        ENDIF.
+
+      ENDDO.
+    ELSE.
+
+      l_result = -1.
+    ENDIF.
+
+    r_result = l_result.
+
+  ENDMETHOD.
+
+
+  METHOD get_client_role.
+    SELECT SINGLE cccategory INTO @r_result FROM t000 AS t WHERE t~mandt = @i_client.
+    IF sy-subrc <> 0.
+      MESSAGE |Could not read client role from T000| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD get_system_name.
+
+    CALL FUNCTION 'GET_SYSTEM_NAME'
+      IMPORTING
+        system_name = r_sysnam.
+
+  ENDMETHOD.
+
+
+  "check if at least one client in the system has role "Production"
+  METHOD has_prod_client.
+
+    SELECT cccategory INTO TABLE @DATA(it_t000) FROM t000 AS t.
+    IF sy-subrc <> 0.
+      MESSAGE |Could not read client category from T000| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
+    ENDIF.
+
+    IF line_exists( it_t000[ cccategory = 'P' ] ).
+      r_result = abap_true.
+    ELSE.
+      r_result = abap_false.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+ENDCLASS.
+
+
 
 CLASS lcl_abapsdk_package_manager DEFINITION FINAL FRIENDS lcl_abapsdk_pm_tree_controller.
 
@@ -447,16 +545,8 @@ CLASS lcl_abapsdk_package_manager DEFINITION FINAL FRIENDS lcl_abapsdk_pm_tree_c
       validate_zipfile_path IMPORTING i_zipfile_path   TYPE string
                                       i_logsubdir_name TYPE fileintern
                             RETURNING VALUE(r_result)  TYPE abap_bool ,
-      cmp_version_string IMPORTING i_string1       TYPE string
-                                   i_string2       TYPE string
-                         RETURNING VALUE(r_result) TYPE i,
-      "get_sdk_version_zip RETURNING VALUE(r_version) TYPE string,
-      "get_sdk_version_web RETURNING VALUE(r_verson) TYPE string,
-      get_client_role IMPORTING i_client        TYPE mandt
-                      RETURNING VALUE(r_result) TYPE cccategory,
       get_running_jobs IMPORTING i_jobname       TYPE syst_repi2
                        RETURNING VALUE(r_result) TYPE tbtcjob_tt,
-      get_system_name RETURNING VALUE(r_sysnam) TYPE tmssysnam,
       run_foreground IMPORTING i_modules_to_be_installed TYPE tt_abapsdk_tla
                                i_modules_to_be_deleted   TYPE tt_abapsdk_tla
                                i_target_version          TYPE string
@@ -487,8 +577,7 @@ CLASS lcl_abapsdk_package_manager DEFINITION FINAL FRIENDS lcl_abapsdk_pm_tree_c
       check_abapsdk_zipfiles_current
         RETURNING VALUE(r_result) TYPE abap_bool
         RAISING   lcx_error,
-      update_abapsdk_zipfile_paths,
-      has_prod_client RETURNING VALUE(r_result) TYPE abap_bool.
+      update_abapsdk_zipfile_paths.
 
 
 
@@ -620,7 +709,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
 
   METHOD constructor.
 
-    IF has_prod_client( ).
+    IF lcl_utils=>has_prod_client( ).
       MESSAGE |System has at least one productive client, please use TMS.| TYPE 'A' ##NO_TEXT.
     ENDIF.
 
@@ -974,44 +1063,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD cmp_version_string.
 
-    IF i_string1 CO '0123456789.' AND
-       i_string2 CO '0123456789.' AND
-       i_string1 CP '*.*.*' AND
-       i_string2 CP '*.*.*'.
-      SPLIT i_string1 AT '.' INTO TABLE DATA(lt_string1).
-      SPLIT i_string2 AT '.' INTO TABLE DATA(lt_string2).
-
-      DATA(l_result) = 0.
-
-      DATA wa_string1 TYPE i.
-      DATA wa_string2 TYPE i.
-
-      DO lines( lt_string1 ) TIMES.
-
-        wa_string1 = lt_string1[ sy-index ].
-        wa_string2 = lt_string2[ sy-index ].
-
-        IF wa_string1 > wa_string2.
-          l_result = 1.
-          EXIT.
-        ELSEIF wa_string1 < wa_string2.
-          l_result = -1.
-          EXIT.
-        ELSE.
-          l_result = 0.
-        ENDIF.
-
-      ENDDO.
-    ELSE.
-
-      l_result = -1.
-    ENDIF.
-
-    r_result = l_result.
-
-  ENDMETHOD.
 
 
   METHOD get_abapsdk_installed_modules.
@@ -1083,7 +1135,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
           lt_irt_requests TYPE STANDARD TABLE OF ctrs_requ.
 
 
-    l_system = get_system_name( ).
+    l_system = lcl_utils=>get_system_name( ).
 
     CALL FUNCTION 'TMS_TM_GET_TRLIST'
       EXPORTING
@@ -1558,7 +1610,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
     DATA: l_tp_ret_code TYPE stpa-retcode.
     DATA: ls_exception TYPE stmscalert.
 
-    l_system = get_system_name( ).
+    l_system = lcl_utils=>get_system_name( ).
 
     " TODO: Needs to go into its own method
     CALL FUNCTION 'TMS_MGR_FORWARD_TR_REQUEST'
@@ -1652,30 +1704,10 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
 
   ENDMETHOD.
 
-  "check if at least one client in the system has role "Production"
-  METHOD has_prod_client.
-
-    SELECT cccategory INTO TABLE @DATA(it_t000) FROM t000 AS t.
-    IF sy-subrc <> 0.
-      MESSAGE |Could not read client category from T000| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-    ENDIF.
-
-    IF line_exists( it_t000[ cccategory = 'P' ] ).
-      r_result = abap_true.
-    ELSE.
-      r_result = abap_false.
-    ENDIF.
-
-  ENDMETHOD.
 
 
-  METHOD get_client_role.
-    SELECT SINGLE cccategory INTO @r_result FROM t000 AS t WHERE t~mandt = @i_client.
-    IF sy-subrc <> 0.
-      MESSAGE |Could not read client role from T000| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-    ENDIF.
 
-  ENDMETHOD.
+
 
   METHOD get_running_jobs.
     " --- Job already running?
@@ -1697,13 +1729,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD get_system_name.
 
-    CALL FUNCTION 'GET_SYSTEM_NAME'
-      IMPORTING
-        system_name = r_sysnam.
-
-  ENDMETHOD.
 
   METHOD is_job_running.
 
@@ -1883,9 +1909,9 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
                                                                     i_source    = 'zip'
                                                                     i_version   = 'LATEST' ).
 
-    IF cmp_version_string( i_string1 = mt_available_modules_inst[ tla = 'core' ]-avers
+    IF lcl_utils=>cmp_version_string( i_string1 = mt_available_modules_inst[ tla = 'core' ]-avers
                                                        i_string2 = lt_mod_avail_inst_zip[ tla = 'core' ]-avers ) = 1
-        OR cmp_version_string( i_string1 = mt_available_modules_uninst[ tla = 'core' ]-avers
+        OR lcl_utils=>cmp_version_string( i_string1 = mt_available_modules_uninst[ tla = 'core' ]-avers
                                                        i_string2 = lt_mod_avail_uninst_zip[ tla = 'core' ]-avers ) = 1.
       MESSAGE 'One or more ABAP SDK zipfiles not current. Downloading new version now.' TYPE 'I' ##NO_TEXT.
       lv_dl_result = download_abapsdk_zipfiles( i_file_list = mt_abapsdk_zipfiles ).
@@ -2883,12 +2909,12 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 
     IF wa_core_module-cvers IS NOT INITIAL.
 
-      IF mr_abapsdk_package_manager->cmp_version_string( i_string1 = mt_available_modules_inst[ tla = 'core' ]-avers
+      IF lcl_utils=>cmp_version_string( i_string1 = mt_available_modules_inst[ tla = 'core' ]-avers
                                                     i_string2 = wa_core_module-cvers ) = 0.
         wa_core_module-op_icon = '@08@'.
         wa_core_module-op_text = 'Module up to date, no operation planned.' ##NO_TEXT.
         wa_core_module-op_code = c_operation_none.
-      ELSEIF mr_abapsdk_package_manager->cmp_version_string( i_string1 = mt_available_modules_inst[ tla = 'core' ]-avers
+      ELSEIF lcl_utils=>cmp_version_string( i_string1 = mt_available_modules_inst[ tla = 'core' ]-avers
                                                         i_string2 = wa_core_module-cvers ) = 1.
         wa_core_module-op_icon = '@09@'.
         wa_core_module-op_text = 'Module will be updated.' ##NO_TEXT.
@@ -3062,12 +3088,12 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 
         l_text = wa_installed_module-tla.
 
-        IF mr_abapsdk_package_manager->cmp_version_string( i_string1 = wa_installed_module-avers
+        IF lcl_utils=>cmp_version_string( i_string1 = wa_installed_module-avers
                                                       i_string2 = wa_installed_module-cvers ) = 0.
           wa_installed_module-op_icon = '@08@'.
           wa_installed_module-op_text = 'Module up to date, no operation planned.' ##NO_TEXT.
           wa_installed_module-op_code = c_operation_none.
-        ELSEIF mr_abapsdk_package_manager->cmp_version_string( i_string1 = wa_installed_module-avers
+        ELSEIF lcl_utils=>cmp_version_string( i_string1 = wa_installed_module-avers
                                                           i_string2 = wa_installed_module-cvers ) = 1.
           wa_installed_module-op_icon = '@09@'.
           wa_installed_module-op_text = 'Module will be updated.' ##NO_TEXT.
@@ -4095,9 +4121,9 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
                                                                                                 i_source    = 'zip'
                                                                                                 i_version   = 'LATEST' ).
 
-    IF mr_abapsdk_package_manager->cmp_version_string( i_string1 = mt_available_modules_inst[ tla = 'core' ]-avers
+    IF lcl_utils=>cmp_version_string( i_string1 = mt_available_modules_inst[ tla = 'core' ]-avers
                                                        i_string2 = lt_mod_avail_inst_zip[ tla = 'core' ]-avers ) = 1
-        OR mr_abapsdk_package_manager->cmp_version_string( i_string1 = mt_available_modules_uninst[ tla = 'core' ]-avers
+        OR lcl_utils=>cmp_version_string( i_string1 = mt_available_modules_uninst[ tla = 'core' ]-avers
                                                        i_string2 = lt_mod_avail_uninst_zip[ tla = 'core' ]-avers ) = 1.
       MESSAGE 'One or more ABAP SDK zipfiles not current. Downloading new version now.' TYPE 'I' ##NO_TEXT.
       lv_dl_result = mr_abapsdk_package_manager->download_abapsdk_zipfiles( i_file_list = mr_abapsdk_package_manager->mt_abapsdk_zipfiles ).
@@ -4808,7 +4834,7 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
             l_node->set_data_row( wa_row ).
 
           ELSE.
-            IF mr_abapsdk_package_manager->cmp_version_string( i_string1 = mt_installed_modules[ tla = 'sts' ]-avers
+            IF lcl_utils=>cmp_version_string( i_string1 = mt_installed_modules[ tla = 'sts' ]-avers
                                                           i_string2 = mt_installed_modules[ tla = 'sts' ]-cvers ) = 1.
               wa_row-op_text = 'Module will be updated.' ##NO_TEXT.
               wa_row-op_icon = '@09@'.
@@ -4854,13 +4880,13 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
             l_node->set_data_row( wa_row ).
 
           ELSE.
-            IF mr_abapsdk_package_manager->cmp_version_string( i_string1 = mt_installed_modules[ tla = l_tla ]-avers
+            IF lcl_utils=>cmp_version_string( i_string1 = mt_installed_modules[ tla = l_tla ]-avers
                                                           i_string2 = mt_installed_modules[ tla = l_tla ]-cvers ) = 1.
               wa_row-op_text = 'Module will be updated.' ##NO_TEXT.
               wa_row-op_icon = '@09@' ##NO_TEXT.
               wa_row-op_code = c_operation_update.
               l_node->set_data_row( wa_row ).
-            ELSEIF mr_abapsdk_package_manager->cmp_version_string( i_string1 = mt_installed_modules[ tla = l_tla ]-avers
+            ELSEIF lcl_utils=>cmp_version_string( i_string1 = mt_installed_modules[ tla = l_tla ]-avers
                                                           i_string2 = mt_installed_modules[ tla = l_tla ]-cvers ) = 0.
               wa_row-op_text = 'Module up to date, no operation planned.' ##NO_TEXT.
               wa_row-op_icon = '@08@' ##NO_TEXT.
@@ -4916,7 +4942,7 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
       CALL FUNCTION 'TMS_UI_SHOW_TRANSPORT_LOGS'
         EXPORTING
           iv_request                 = CONV tmsbuffer-trkorr( wa_row-ctransport )
-          iv_system                  = CONV tmscsys-sysnam( mr_abapsdk_package_manager->get_system_name( ) )
+          iv_system                  = CONV tmscsys-sysnam( lcl_utils=>get_system_name( ) )
           iv_verbose                 = abap_true
         EXCEPTIONS
           show_transport_logs_failed = 1
@@ -4935,7 +4961,7 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
       CALL FUNCTION 'TMS_UI_SHOW_TRANSPORT_REQUEST'
         EXPORTING
           iv_request                    = CONV tmsbuffer-trkorr( wa_row-ctransport )
-          iv_target_system              = CONV tmscsys-sysnam( mr_abapsdk_package_manager->get_system_name( ) )
+          iv_target_system              = CONV tmscsys-sysnam( lcl_utils=>get_system_name( ) )
           iv_verbose                    = abap_true
         EXCEPTIONS
           show_transport_request_failed = 1
