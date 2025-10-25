@@ -504,7 +504,9 @@ CLASS lcl_certificate_manager IMPLEMENTATION.
 
   METHOD constructor.
 
-    IF internet_manager IS NOT BOUND.
+    IF i_internet_manager IS BOUND.
+      internet_manager = i_internet_manager.
+    else.
       internet_manager = NEW lcl_internet_manager( ).
     ENDIF.
 
@@ -2690,11 +2692,15 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 
   METHOD constructor.
 
-    IF mr_abapsdk_package_manager IS NOT BOUND.
+    IF ir_abapsdk_package_manager IS BOUND.
       mr_abapsdk_package_manager = ir_abapsdk_package_manager.
+    else.
+       mr_abapsdk_package_manager = NEW lcl_abapsdk_package_manager( ).
     ENDIF.
 
-    IF certificate_manager IS NOT BOUND.
+    IF i_certificate_manager IS BOUND.
+      certificate_manager = i_certificate_manager.
+    else.
       certificate_manager = NEW lcl_certificate_manager( ).
     ENDIF.
 
