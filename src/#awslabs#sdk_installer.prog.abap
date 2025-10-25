@@ -26,9 +26,11 @@ REPORT /awslabs/sdk_installer.
 
 INTERFACE lif_internet_manager DEFERRED.
 INTERFACE lif_report_update_manager DEFERRED.
+INTERFACE lif_certificate_manager DEFERRED.
 
 CLASS lcl_internet_manager DEFINITION DEFERRED.
 CLASS lcl_report_update_manager DEFINITION DEFERRED.
+CLASS lcl_certificate_manager DEFINITION DEFERRED.
 CLASS lcl_abapsdk_package_manager DEFINITION DEFERRED.
 CLASS lcl_abapsdk_pm_tree_controller DEFINITION DEFERRED.
 CLASS lcl_utils DEFINITION DEFERRED.
@@ -127,7 +129,8 @@ ENDINTERFACE.
 CLASS lcl_internet_manager DEFINITION.
 
   PUBLIC SECTION.
-    INTERFACES: lif_internet_manager.
+    INTERFACES:
+      lif_internet_manager.
 
 ENDCLASS.
 
@@ -255,7 +258,8 @@ ENDINTERFACE.
 CLASS lcl_report_update_manager DEFINITION.
 
   PUBLIC SECTION.
-    INTERFACES: lif_report_update_manager.
+    INTERFACES:
+      lif_report_update_manager.
 
     METHODS:
       constructor IMPORTING i_internet_manager TYPE REF TO lif_internet_manager OPTIONAL.
@@ -455,6 +459,314 @@ CLASS lcl_utils IMPLEMENTATION.
 ENDCLASS.
 
 
+INTERFACE lif_certificate_manager.
+
+  TYPES: BEGIN OF ts_amazon_root_certificate,
+           subject   TYPE string,
+           uri       TYPE w3_url,
+           binary    TYPE xstring,
+           installed TYPE abap_bool,
+         END OF ts_amazon_root_certificate.
+
+  TYPES: tt_amazon_root_certificate TYPE STANDARD TABLE OF ts_amazon_root_certificate WITH KEY subject.
+
+  METHODS:
+    set_amazon_root_cert_values,
+    set_amazon_root_cert_status RAISING lcx_error,
+    install_amazon_root_certs RETURNING VALUE(r_success) TYPE abap_bool RAISING lcx_error,
+    setup_certificates RETURNING VALUE(r_result) TYPE abap_bool RAISING lcx_error.
+
+ENDINTERFACE.
+
+
+CLASS lcl_certificate_manager DEFINITION FINAL.
+
+  PUBLIC SECTION.
+    INTERFACES:
+      lif_certificate_manager.
+
+    METHODS:
+      constructor IMPORTING i_internet_manager TYPE REF TO lif_internet_manager OPTIONAL.
+
+  PRIVATE SECTION.
+    DATA: internet_manager TYPE REF TO lif_internet_manager.
+    DATA: mt_amazon_root_certs TYPE lif_certificate_manager~tt_amazon_root_certificate. " populated in set_amazon_root_cert_values
+
+    METHODS:
+      check_bapiret
+        IMPORTING it_bapiret2 TYPE bapiret2_t
+        RAISING   lcx_error.
+
+ENDCLASS.
+
+
+CLASS lcl_certificate_manager IMPLEMENTATION.
+
+  METHOD constructor.
+
+    IF internet_manager IS NOT BOUND.
+      internet_manager = NEW lcl_internet_manager( ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD check_bapiret.
+    LOOP AT it_bapiret2 ASSIGNING FIELD-SYMBOL(<bapiret>) WHERE type CA 'AE'.
+      IF <bapiret>-message IS NOT INITIAL.
+        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not put certificate: { <bapiret>-message }| ##NO_TEXT.
+      ELSE.
+        DATA lv_msg TYPE string.
+        MESSAGE ID <bapiret>-id TYPE <bapiret>-type NUMBER <bapiret>-number
+          WITH <bapiret>-message_v1 <bapiret>-message_v2 <bapiret>-message_v3 <bapiret>-message_v4
+          INTO lv_msg.
+        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not put certificate: { lv_msg }| ##NO_TEXT.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+
+  METHOD lif_certificate_manager~install_amazon_root_certs.
+
+    DATA wa_amazon_root_cert TYPE lif_certificate_manager~ts_amazon_root_certificate.
+
+    DATA ls_strust_identity TYPE ssf_s_strust_identity.
+    DATA lt_bapiret2 TYPE STANDARD TABLE OF bapiret2.
+
+    DATA l_abap_matcher TYPE REF TO cl_abap_matcher.
+    DATA l_abap_regex_pcre TYPE REF TO cl_abap_regex.
+
+
+    ls_strust_identity-pse_context = 'SSLC' ##NO_TEXT.
+    ls_strust_identity-pse_applic = 'DFAULT' ##NO_TEXT.
+    ls_strust_identity-pse_descript = 'SSL Client (Standard)' ##NO_TEXT.
+    ls_strust_identity-sprsl = 'E'.
+
+    " root cert URLS set in set_amazon_root_cert_values
+    LOOP AT mt_amazon_root_certs INTO wa_amazon_root_cert FROM 1 TO 4.
+
+      IF wa_amazon_root_cert-installed = abap_true.
+        CONTINUE.
+      ENDIF.
+
+      DATA(root_cert_name_http) = segment( val   = wa_amazon_root_cert-uri
+                                           sep   = '/'
+                                           index = -1 ).
+      wa_amazon_root_cert-binary = internet_manager->download( i_absolute_uri = wa_amazon_root_cert-uri
+                                                               i_blankstocrlf = abap_false ).
+      CALL FUNCTION 'SSFR_PUT_CERTIFICATE'
+        EXPORTING
+          is_strust_identity = ls_strust_identity
+          iv_certificate     = wa_amazon_root_cert-binary
+        TABLES
+          et_bapiret2        = lt_bapiret2.
+      check_bapiret( lt_bapiret2 ).
+
+    ENDLOOP.
+
+    CALL FUNCTION 'ICM_SSL_PSE_CHANGED'
+      EXCEPTIONS
+        icm_op_failed       = 1
+        icm_get_serv_failed = 2
+        icm_auth_failed     = 3
+        OTHERS              = 4.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Error updating PSE| ##NO_TEXT.
+    ENDIF.
+
+    " root cert URLS set in set_amazon_root_cert_values
+    LOOP AT mt_amazon_root_certs INTO wa_amazon_root_cert FROM 5.
+
+      IF wa_amazon_root_cert-installed = abap_true.
+        CONTINUE.
+      ENDIF.
+
+      DATA(root_cert_name_https) = segment( val   = wa_amazon_root_cert-uri
+                                            sep   = '/'
+                                            index = -1 ).
+      wa_amazon_root_cert-binary = internet_manager->download( i_absolute_uri = wa_amazon_root_cert-uri
+                                                               i_blankstocrlf = abap_false ).
+      CALL FUNCTION 'SSFR_PUT_CERTIFICATE'
+        EXPORTING
+          is_strust_identity = ls_strust_identity
+          iv_certificate     = wa_amazon_root_cert-binary
+        TABLES
+          et_bapiret2        = lt_bapiret2.
+      check_bapiret( lt_bapiret2 ).
+
+    ENDLOOP.
+
+    MESSAGE |Certificates installed.| TYPE 'S' ##NO_TEXT.
+
+    r_success = abap_true .
+
+  ENDMETHOD.
+
+
+  METHOD lif_certificate_manager~setup_certificates.
+
+    DATA lt_missing_certs TYPE lif_certificate_manager~tt_amazon_root_certificate.
+    LOOP AT mt_amazon_root_certs INTO DATA(wa_amazon_root_cert).
+      IF wa_amazon_root_cert-installed = abap_false AND sy-tabix > 4.
+        APPEND wa_amazon_root_cert TO lt_missing_certs.
+      ENDIF.
+    ENDLOOP.
+
+    IF lines( lt_missing_certs ) > 0.
+
+      DATA lv_text TYPE string.
+      lv_text = |It appears your system is missing one or more of the five Amazon Root SSL Certificates. |
+                && |These certificates have to be installed in order to download and use the newest version of the ABAP SDK. |
+                && |The report can download and maintain them automatically for you if your SAP system has an Internet connection. |
+                && |Amazon Root SSL Certificates are available from https://www.amazontrust.com/repository/ | ##NO_TEXT.
+
+      DATA lv_answer TYPE c.
+
+      CALL FUNCTION 'POPUP_TO_CONFIRM'
+        EXPORTING
+          titlebar              = ' '
+          diagnose_object       = ' '
+          text_question         = lv_text
+          text_button_1         = |Do it for me|
+          icon_button_1         = ' '
+          text_button_2         = |Not now|
+          icon_button_2         = ' '
+          default_button        = '1'
+          display_cancel_button = ' '
+          userdefined_f1_help   = ' '
+          start_column          = 25
+          start_row             = 6
+          iv_quickinfo_button_1 = ' '
+          iv_quickinfo_button_2 = ' '
+        IMPORTING
+          answer                = lv_answer
+        EXCEPTIONS
+          text_not_found        = 1
+          OTHERS                = 2 ##NO_TEXT.
+      IF sy-subrc <> 0.
+        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
+      ENDIF.
+
+      IF lv_answer = 1.
+        lif_certificate_manager~install_amazon_root_certs( ).
+      ELSE.
+        LEAVE PROGRAM.
+      ENDIF.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD lif_certificate_manager~set_amazon_root_cert_values.
+    INSERT VALUE #( subject = 'CN=Amazon RSA 2048 M01, O=Amazon, C=US'
+                    uri = 'http://crt.r2m01.amazontrust.com/r2m01.cer'
+                    binary = ''
+                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 1 ##NO_TEXT.
+    INSERT VALUE #( subject = 'CN=Amazon RSA 2048 M02, O=Amazon, C=US'
+                    uri = 'http://crt.r2m01.amazontrust.com/r2m02.cer'
+                    binary = ''
+                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 2 ##NO_TEXT.
+    INSERT VALUE #( subject = 'CN=Amazon RSA 2048 M03, O=Amazon, C=US'
+                    uri = 'http://crt.r2m01.amazontrust.com/r2m03.cer'
+                    binary = ''
+                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 3 ##NO_TEXT.
+    INSERT VALUE #( subject = 'CN=Amazon RSA 2048 M04, O=Amazon, C=US'
+                    uri = 'http://crt.r2m01.amazontrust.com/r2m04.cer'
+                    binary = ''
+                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 4 ##NO_TEXT.
+    INSERT VALUE #( subject = 'CN=Amazon Root CA 1, O=Amazon, C=US'
+                    uri = 'https://www.amazontrust.com/repository/AmazonRootCA1.cer'
+                    binary = ''
+                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 5 ##NO_TEXT.
+    INSERT VALUE #( subject = 'CN=Amazon Root CA 2, O=Amazon, C=US'
+                    uri = 'https://www.amazontrust.com/repository/AmazonRootCA2.cer'
+                    binary = ''
+                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 6 ##NO_TEXT.
+    INSERT VALUE #( subject = 'CN=Amazon Root CA 3, O=Amazon, C=US'
+                    uri = 'https://www.amazontrust.com/repository/AmazonRootCA3.cer'
+                    binary = ''
+                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 7 ##NO_TEXT.
+    INSERT VALUE #( subject = 'CN=Amazon Root CA 4, O=Amazon, C=US'
+                    uri = 'https://www.amazontrust.com/repository/AmazonRootCA4.cer'
+                    binary = ''
+                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 8 ##NO_TEXT.
+    INSERT VALUE #( subject = 'CN=Starfield Services Root Certificate Authority - G2, O="Starfield Technologies, Inc.", L=Scottsdale, SP=Arizona, C=US'
+                    uri = 'https://www.amazontrust.com/repository/SFSRootCAG2.cer'
+                    binary = ''
+                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 9 ##NO_TEXT.
+  ENDMETHOD.
+
+
+  METHOD lif_certificate_manager~set_amazon_root_cert_status.
+
+    DATA ls_strust_identity TYPE ssf_s_strust_identity.
+    DATA lt_certificatelist TYPE ssfbintab.
+    DATA wa_certificate_binary TYPE LINE OF ssfbintab.
+    DATA wa_amazon_root_cert TYPE lif_certificate_manager~ts_amazon_root_certificate.
+    DATA lt_bapiret2 TYPE STANDARD TABLE OF bapiret2.
+
+
+    ls_strust_identity-pse_context = 'SSLC'.
+    ls_strust_identity-pse_applic = 'DFAULT'.
+    ls_strust_identity-pse_descript = 'SSL Client (Standard)' ##NO_TEXT.
+    ls_strust_identity-sprsl = 'E'.
+
+
+    CALL FUNCTION 'SSFR_GET_CERTIFICATELIST'
+      EXPORTING
+        is_strust_identity = ls_strust_identity
+      IMPORTING
+        et_certificatelist = lt_certificatelist
+      TABLES
+        et_bapiret2        = lt_bapiret2.
+    check_bapiret( lt_bapiret2 ).
+
+    CLEAR lt_bapiret2.
+
+    DATA l_subject TYPE string.
+    DATA l_issuer TYPE string.
+    DATA l_serialno TYPE string.
+    DATA l_validfrom TYPE string.
+    DATA l_validto TYPE string.
+    DATA l_algid TYPE string.
+
+    LOOP AT lt_certificatelist INTO wa_certificate_binary.
+
+      CALL FUNCTION 'SSFR_PARSE_CERTIFICATE'
+        EXPORTING
+          iv_certificate = wa_certificate_binary
+        IMPORTING
+          ev_subject     = l_subject
+          ev_issuer      = l_issuer
+          ev_serialno    = l_serialno
+          ev_validfrom   = l_validfrom
+          ev_validto     = l_validto
+          ev_algid       = l_algid
+        TABLES
+          et_bapiret2    = lt_bapiret2.
+      check_bapiret( lt_bapiret2 ).
+
+      READ TABLE mt_amazon_root_certs WITH TABLE KEY subject = l_subject INTO wa_amazon_root_cert.
+
+      IF sy-subrc = 0.  " found existing certificate
+        wa_amazon_root_cert-binary = wa_certificate_binary.
+        wa_amazon_root_cert-installed = abap_true.
+        MODIFY TABLE mt_amazon_root_certs FROM wa_amazon_root_cert.
+      ENDIF.
+
+      CLEAR: l_subject, l_issuer, l_serialno, l_validfrom, l_validto, l_algid.
+      CLEAR wa_amazon_root_cert.
+      CLEAR lt_bapiret2.
+    ENDLOOP.
+
+
+
+  ENDMETHOD.
+
+
+ENDCLASS.
+
+
+
 
 CLASS lcl_abapsdk_package_manager DEFINITION FINAL FRIENDS lcl_abapsdk_pm_tree_controller.
 
@@ -462,17 +774,7 @@ CLASS lcl_abapsdk_package_manager DEFINITION FINAL FRIENDS lcl_abapsdk_pm_tree_c
 
   PUBLIC SECTION.
 
-    TYPES: BEGIN OF ts_amazon_root_certificate,
-             subject   TYPE string,
-             uri       TYPE w3_url,
-             binary    TYPE xstring,
-             installed TYPE abap_bool,
-           END OF ts_amazon_root_certificate.
-
-    TYPES tt_amazon_root_certificate TYPE STANDARD TABLE OF ts_amazon_root_certificate WITH KEY subject.
-
     DATA:
-      mt_amazon_root_certs        TYPE tt_amazon_root_certificate, " populated in set_amazon_root_cert_values
       mt_abapsdk_zipfiles         TYPE tt_abapsdk_zip,
       m_sdk_index_json_zip_path   TYPE string READ-ONLY,
       m_transports_zip_path       TYPE w3_url READ-ONLY,
@@ -484,14 +786,10 @@ CLASS lcl_abapsdk_package_manager DEFINITION FINAL FRIENDS lcl_abapsdk_pm_tree_c
     METHODS:
       constructor IMPORTING i_batch_mode TYPE syst-batch OPTIONAL
                   RAISING   lcx_error,
-      set_amazon_root_cert_values,
-      set_amazon_root_cert_status RAISING lcx_error,
-      install_amazon_root_certs RETURNING VALUE(r_success) TYPE abap_bool RAISING lcx_error,
       install_all_modules IMPORTING it_modules_to_be_installed TYPE tt_abapsdk_tla
                                     it_modules_to_be_deleted   TYPE tt_abapsdk_tla
                           RETURNING VALUE(r_jobnumber)         TYPE btcjobcnt
                           RAISING   lcx_error,
-      setup_certificates RETURNING VALUE(r_result) TYPE abap_bool RAISING lcx_error,
       download_abapsdk_zipfiles IMPORTING i_file_list      TYPE tt_abapsdk_zip
                                           i_version        TYPE string DEFAULT 'LATEST'
                                 RETURNING VALUE(r_success) TYPE abap_bool
@@ -586,6 +884,7 @@ CLASS lcl_abapsdk_package_manager DEFINITION FINAL FRIENDS lcl_abapsdk_pm_tree_c
   PRIVATE SECTION.
 
     DATA: internet_manager TYPE REF TO lif_internet_manager.
+    DATA: certificate_manager TYPE REF TO lif_certificate_manager.
 
     CONSTANTS c_trans_logical_path TYPE filepath-pathintern VALUE 'ASSEMBLY'.
     CONSTANTS c_logsubdir_name TYPE fileintern VALUE 'BC_RSTEXTA3'.
@@ -602,14 +901,10 @@ CLASS lcl_abapsdk_package_manager DEFINITION FINAL FRIENDS lcl_abapsdk_pm_tree_c
       IMPORTING iv_filename TYPE clike
       RAISING   lcx_error.
 
-
     METHODS open_for_output
       IMPORTING iv_filename TYPE clike
       RAISING   lcx_error.
 
-    METHODS check_bapiret
-      IMPORTING it_bapiret2 TYPE bapiret2_t
-      RAISING   lcx_error.
 
     METHODS binary_to_xstring
       IMPORTING it_bintab         TYPE table
@@ -714,6 +1009,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
     ENDIF.
 
     internet_manager = NEW lcl_internet_manager( ).
+    certificate_manager = NEW lcl_certificate_manager( ).
 
 
     DATA wa_zipfile_inst TYPE ts_abapsdk_zip.
@@ -759,9 +1055,9 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
     m_sdk_index_json_zip_path = 'META-INF/sdk_index.json' ##NO_TEXT.
     m_transports_zip_path = 'transports/' ##NO_TEXT.
 
-    set_amazon_root_cert_values( ).
+    certificate_manager->set_amazon_root_cert_values( ).
 
-    set_amazon_root_cert_status( ).
+    certificate_manager->set_amazon_root_cert_status( ).
 
     TRY.
         IF internet_manager->has_internet_access( ) = abap_false.
@@ -771,7 +1067,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
         MESSAGE |This report requires HTTP(S) Internet access, please enable before usage.| TYPE 'A' ##NO_TEXT.
     ENDTRY.
 
-    setup_certificates( ).
+    certificate_manager->setup_certificates( ).
 
     mt_available_modules_inst = get_abapsdk_avail_modules_json( i_operation = 'install'
                                                                 i_source    = 'web'
@@ -820,249 +1116,6 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
                                     i_target_version          = lv_target_version ).
 
   ENDMETHOD.
-
-
-  METHOD install_amazon_root_certs.
-
-    DATA wa_amazon_root_cert TYPE ts_amazon_root_certificate.
-
-    DATA ls_strust_identity TYPE ssf_s_strust_identity.
-    DATA lt_bapiret2 TYPE STANDARD TABLE OF bapiret2.
-
-    DATA l_abap_matcher TYPE REF TO cl_abap_matcher.
-    DATA l_abap_regex_pcre TYPE REF TO cl_abap_regex.
-
-
-    ls_strust_identity-pse_context = 'SSLC' ##NO_TEXT.
-    ls_strust_identity-pse_applic = 'DFAULT' ##NO_TEXT.
-    ls_strust_identity-pse_descript = 'SSL Client (Standard)' ##NO_TEXT.
-    ls_strust_identity-sprsl = 'E'.
-
-    " root cert URLS set in set_amazon_root_cert_values
-    LOOP AT mt_amazon_root_certs INTO wa_amazon_root_cert FROM 1 TO 4.
-
-      IF wa_amazon_root_cert-installed = abap_true.
-        CONTINUE.
-      ENDIF.
-
-      DATA(root_cert_name_http) = segment( val   = wa_amazon_root_cert-uri
-                                           sep   = '/'
-                                           index = -1 ).
-      wa_amazon_root_cert-binary = internet_manager->download( i_absolute_uri = wa_amazon_root_cert-uri
-                                                               i_blankstocrlf = abap_false ).
-
-
-      CALL FUNCTION 'SSFR_PUT_CERTIFICATE'
-        EXPORTING
-          is_strust_identity = ls_strust_identity
-          iv_certificate     = wa_amazon_root_cert-binary
-        TABLES
-          et_bapiret2        = lt_bapiret2.
-      check_bapiret( lt_bapiret2 ).
-
-    ENDLOOP.
-
-    CALL FUNCTION 'ICM_SSL_PSE_CHANGED'
-      EXCEPTIONS
-        icm_op_failed       = 1
-        icm_get_serv_failed = 2
-        icm_auth_failed     = 3
-        OTHERS              = 4.
-    IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Error updating PSE| ##NO_TEXT.
-    ENDIF.
-
-    " root cert URLS set in set_amazon_root_cert_values
-    LOOP AT mt_amazon_root_certs INTO wa_amazon_root_cert FROM 5.
-
-      IF wa_amazon_root_cert-installed = abap_true.
-        CONTINUE.
-      ENDIF.
-
-      DATA(root_cert_name_https) = segment( val   = wa_amazon_root_cert-uri
-                                            sep   = '/'
-                                            index = -1 ).
-      wa_amazon_root_cert-binary = internet_manager->download( i_absolute_uri = wa_amazon_root_cert-uri
-                                                               i_blankstocrlf = abap_false ).
-
-
-      CALL FUNCTION 'SSFR_PUT_CERTIFICATE'
-        EXPORTING
-          is_strust_identity = ls_strust_identity
-          iv_certificate     = wa_amazon_root_cert-binary
-        TABLES
-          et_bapiret2        = lt_bapiret2.
-      check_bapiret( lt_bapiret2 ).
-
-    ENDLOOP.
-
-
-
-    MESSAGE |Certificates installed.| TYPE 'S' ##NO_TEXT.
-
-    r_success = abap_true .
-
-  ENDMETHOD.
-
-  METHOD setup_certificates.
-
-    DATA lt_missing_certs TYPE tt_amazon_root_certificate.
-    LOOP AT mt_amazon_root_certs INTO DATA(wa_amazon_root_cert).
-      IF wa_amazon_root_cert-installed = abap_false AND sy-tabix > 4.
-        APPEND wa_amazon_root_cert TO lt_missing_certs.
-      ENDIF.
-    ENDLOOP.
-
-    IF lines( lt_missing_certs ) > 0.
-
-      DATA lv_text TYPE string.
-      lv_text = |It appears your system is missing one or more of the five Amazon Root SSL Certificates. |
-                && |These certificates have to be installed in order to download and use the newest version of the ABAP SDK. |
-                && |The report can download and maintain them automatically for you if your SAP system has an Internet connection. |
-                && |Amazon Root SSL Certificates are available from https://www.amazontrust.com/repository/ | ##NO_TEXT.
-
-      DATA lv_answer TYPE c.
-
-      CALL FUNCTION 'POPUP_TO_CONFIRM'
-        EXPORTING
-          titlebar              = ' '
-          diagnose_object       = ' '
-          text_question         = lv_text
-          text_button_1         = |Do it for me|
-          icon_button_1         = ' '
-          text_button_2         = |Not now|
-          icon_button_2         = ' '
-          default_button        = '1'
-          display_cancel_button = ' '
-          userdefined_f1_help   = ' '
-          start_column          = 25
-          start_row             = 6
-          iv_quickinfo_button_1 = ' '
-          iv_quickinfo_button_2 = ' '
-        IMPORTING
-          answer                = lv_answer
-        EXCEPTIONS
-          text_not_found        = 1
-          OTHERS                = 2 ##NO_TEXT.
-      IF sy-subrc <> 0.
-        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
-      ENDIF.
-
-      IF lv_answer = 1.
-        install_amazon_root_certs( ).
-      ELSE.
-        LEAVE PROGRAM.
-      ENDIF.
-    ENDIF.
-
-  ENDMETHOD.
-
-  METHOD set_amazon_root_cert_values.
-    INSERT VALUE #( subject = 'CN=Amazon RSA 2048 M01, O=Amazon, C=US'
-                    uri = 'http://crt.r2m01.amazontrust.com/r2m01.cer'
-                    binary = ''
-                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 1 ##NO_TEXT.
-    INSERT VALUE #( subject = 'CN=Amazon RSA 2048 M02, O=Amazon, C=US'
-                    uri = 'http://crt.r2m01.amazontrust.com/r2m02.cer'
-                    binary = ''
-                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 2 ##NO_TEXT.
-    INSERT VALUE #( subject = 'CN=Amazon RSA 2048 M03, O=Amazon, C=US'
-                    uri = 'http://crt.r2m01.amazontrust.com/r2m03.cer'
-                    binary = ''
-                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 3 ##NO_TEXT.
-    INSERT VALUE #( subject = 'CN=Amazon RSA 2048 M04, O=Amazon, C=US'
-                    uri = 'http://crt.r2m01.amazontrust.com/r2m04.cer'
-                    binary = ''
-                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 4 ##NO_TEXT.
-    INSERT VALUE #( subject = 'CN=Amazon Root CA 1, O=Amazon, C=US'
-                    uri = 'https://www.amazontrust.com/repository/AmazonRootCA1.cer'
-                    binary = ''
-                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 5 ##NO_TEXT.
-    INSERT VALUE #( subject = 'CN=Amazon Root CA 2, O=Amazon, C=US'
-                    uri = 'https://www.amazontrust.com/repository/AmazonRootCA2.cer'
-                    binary = ''
-                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 6 ##NO_TEXT.
-    INSERT VALUE #( subject = 'CN=Amazon Root CA 3, O=Amazon, C=US'
-                    uri = 'https://www.amazontrust.com/repository/AmazonRootCA3.cer'
-                    binary = ''
-                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 7 ##NO_TEXT.
-    INSERT VALUE #( subject = 'CN=Amazon Root CA 4, O=Amazon, C=US'
-                    uri = 'https://www.amazontrust.com/repository/AmazonRootCA4.cer'
-                    binary = ''
-                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 8 ##NO_TEXT.
-    INSERT VALUE #( subject = 'CN=Starfield Services Root Certificate Authority - G2, O="Starfield Technologies, Inc.", L=Scottsdale, SP=Arizona, C=US'
-                    uri = 'https://www.amazontrust.com/repository/SFSRootCAG2.cer'
-                    binary = ''
-                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 9 ##NO_TEXT.
-  ENDMETHOD.
-
-  METHOD set_amazon_root_cert_status.
-
-    DATA ls_strust_identity TYPE ssf_s_strust_identity.
-    DATA lt_certificatelist TYPE ssfbintab.
-    DATA wa_certificate_binary TYPE LINE OF ssfbintab.
-    DATA wa_amazon_root_cert TYPE ts_amazon_root_certificate.
-    DATA lt_bapiret2 TYPE STANDARD TABLE OF bapiret2.
-
-
-    ls_strust_identity-pse_context = 'SSLC'.
-    ls_strust_identity-pse_applic = 'DFAULT'.
-    ls_strust_identity-pse_descript = 'SSL Client (Standard)' ##NO_TEXT.
-    ls_strust_identity-sprsl = 'E'.
-
-
-    CALL FUNCTION 'SSFR_GET_CERTIFICATELIST'
-      EXPORTING
-        is_strust_identity = ls_strust_identity
-      IMPORTING
-        et_certificatelist = lt_certificatelist
-      TABLES
-        et_bapiret2        = lt_bapiret2.
-    check_bapiret( lt_bapiret2 ).
-
-    CLEAR lt_bapiret2.
-
-    DATA l_subject TYPE string.
-    DATA l_issuer TYPE string.
-    DATA l_serialno TYPE string.
-    DATA l_validfrom TYPE string.
-    DATA l_validto TYPE string.
-    DATA l_algid TYPE string.
-
-    LOOP AT lt_certificatelist INTO wa_certificate_binary.
-
-      CALL FUNCTION 'SSFR_PARSE_CERTIFICATE'
-        EXPORTING
-          iv_certificate = wa_certificate_binary
-        IMPORTING
-          ev_subject     = l_subject
-          ev_issuer      = l_issuer
-          ev_serialno    = l_serialno
-          ev_validfrom   = l_validfrom
-          ev_validto     = l_validto
-          ev_algid       = l_algid
-        TABLES
-          et_bapiret2    = lt_bapiret2.
-      check_bapiret( lt_bapiret2 ).
-
-      READ TABLE mt_amazon_root_certs WITH TABLE KEY subject = l_subject INTO wa_amazon_root_cert.
-
-      IF sy-subrc = 0.  " found existing certificate
-        wa_amazon_root_cert-binary = wa_certificate_binary.
-        wa_amazon_root_cert-installed = abap_true.
-        MODIFY TABLE mt_amazon_root_certs FROM wa_amazon_root_cert.
-      ENDIF.
-
-      CLEAR: l_subject, l_issuer, l_serialno, l_validfrom, l_validto, l_algid.
-      CLEAR wa_amazon_root_cert.
-      CLEAR lt_bapiret2.
-    ENDLOOP.
-
-
-
-  ENDMETHOD.
-
-
 
 
 
@@ -2485,19 +2538,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
-  METHOD check_bapiret.
-    LOOP AT it_bapiret2 ASSIGNING FIELD-SYMBOL(<bapiret>) WHERE type CA 'AE'.
-      IF <bapiret>-message IS NOT INITIAL.
-        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not put certificate: { <bapiret>-message }| ##NO_TEXT.
-      ELSE.
-        DATA lv_msg TYPE string.
-        MESSAGE ID <bapiret>-id TYPE <bapiret>-type NUMBER <bapiret>-number
-          WITH <bapiret>-message_v1 <bapiret>-message_v2 <bapiret>-message_v3 <bapiret>-message_v4
-          INTO lv_msg.
-        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not put certificate: { lv_msg }| ##NO_TEXT.
-      ENDIF.
-    ENDLOOP.
-  ENDMETHOD.
+
 
   METHOD binary_to_xstring.
     CALL FUNCTION 'SCMS_BINARY_TO_XSTRING'
@@ -2563,6 +2604,7 @@ CLASS lcl_abapsdk_pm_tree_controller DEFINITION FINAL FRIENDS lcl_abapsdk_packag
 
     METHODS:
       constructor IMPORTING ir_abapsdk_package_manager TYPE REF TO lcl_abapsdk_package_manager
+                            i_certificate_manager      TYPE REF TO lif_certificate_manager OPTIONAL
                   RAISING   lcx_error,
       get_modules_to_be_installed IMPORTING i_target_version                  TYPE string
                                   RETURNING VALUE(rt_modules_to_be_installed) TYPE tt_abapsdk_tla,
@@ -2638,6 +2680,7 @@ CLASS lcl_abapsdk_pm_tree_controller DEFINITION FINAL FRIENDS lcl_abapsdk_packag
 
   PROTECTED SECTION.
   PRIVATE SECTION.
+    DATA: certificate_manager TYPE REF TO lif_certificate_manager.
 
 ENDCLASS.
 
@@ -2647,7 +2690,13 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 
   METHOD constructor.
 
-    mr_abapsdk_package_manager = ir_abapsdk_package_manager.
+    IF mr_abapsdk_package_manager IS NOT BOUND.
+      mr_abapsdk_package_manager = ir_abapsdk_package_manager.
+    ENDIF.
+
+    IF certificate_manager IS NOT BOUND.
+      certificate_manager = NEW lcl_certificate_manager( ).
+    ENDIF.
 
     mt_installed_modules = mr_abapsdk_package_manager->get_abapsdk_installed_modules( ).
 
@@ -4704,7 +4753,7 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 
           WHEN 'DOW_CERT'.
 
-            mr_abapsdk_package_manager->install_amazon_root_certs( ).
+            certificate_manager->install_amazon_root_certs( ).
 
           WHEN 'DOW_TRAK'.
 
