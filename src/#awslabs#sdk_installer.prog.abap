@@ -24,15 +24,19 @@
 
 REPORT /awslabs/sdk_installer.
 
-INTERFACE lif_internet_manager DEFERRED.
-INTERFACE lif_report_update_manager DEFERRED.
-INTERFACE lif_certificate_manager DEFERRED.
+INTERFACE lif_sdk_internet_manager DEFERRED.
+INTERFACE lif_sdk_report_update_manager DEFERRED.
+INTERFACE lif_sdk_certificate_manager DEFERRED.
+INTERFACE lif_sdk_file_manager DEFERRED.
+INTERFACE lif_sdk_tms_manager DEFERRED.
 
-CLASS lcl_internet_manager DEFINITION DEFERRED.
-CLASS lcl_report_update_manager DEFINITION DEFERRED.
-CLASS lcl_certificate_manager DEFINITION DEFERRED.
-CLASS lcl_abapsdk_package_manager DEFINITION DEFERRED.
-CLASS lcl_abapsdk_pm_tree_controller DEFINITION DEFERRED.
+CLASS lcl_sdk_internet_manager DEFINITION DEFERRED.
+CLASS lcl_sdk_report_update_manager DEFINITION DEFERRED.
+CLASS lcl_sdk_certificate_manager DEFINITION DEFERRED.
+CLASS lcl_sdk_file_manager DEFINITION DEFERRED.
+CLASS lcl_sdk_tms_manager DEFINITION DEFERRED.
+CLASS lcl_sdk_package_manager DEFINITION DEFERRED.
+CLASS lcl_ui_tree_controller DEFINITION DEFERRED.
 CLASS lcl_utils DEFINITION DEFERRED.
 CLASS lcx_error DEFINITION DEFERRED.
 CLASS lcl_main DEFINITION DEFERRED.
@@ -94,6 +98,7 @@ CLASS lcx_error DEFINITION
     METHODS show.
 ENDCLASS.
 
+
 CLASS lcx_error IMPLEMENTATION.
   METHOD constructor.
     super->constructor( previous = previous ).
@@ -109,259 +114,6 @@ CLASS lcx_error IMPLEMENTATION.
 ENDCLASS.
 
 
-
-INTERFACE lif_internet_manager.
-
-  CONSTANTS: c_url_internet_check TYPE w3_url VALUE 'http://ocsp.r2m02.amazontrust.com'.
-
-  METHODS:
-    download IMPORTING i_absolute_uri         TYPE w3_url
-                       i_blankstocrlf         TYPE boolean
-             RETURNING VALUE(r_response_body) TYPE xstring
-             RAISING   lcx_error,
-    has_internet_access
-      RETURNING VALUE(r_result) TYPE abap_bool
-      RAISING   lcx_error.
-
-ENDINTERFACE.
-
-
-CLASS lcl_internet_manager DEFINITION.
-
-  PUBLIC SECTION.
-    INTERFACES:
-      lif_internet_manager.
-
-ENDCLASS.
-
-CLASS lcl_internet_manager IMPLEMENTATION.
-
-  METHOD lif_internet_manager~download.
-
-    DATA status_code TYPE i.
-    DATA status_text TYPE string.
-    DATA response_entity_body_length TYPE i.
-
-    DATA request_entity_body TYPE STANDARD TABLE OF docs.
-    DATA request_headers TYPE STANDARD TABLE OF docs.
-    DATA response_entity_body TYPE STANDARD TABLE OF docs.
-    DATA response_headers TYPE STANDARD TABLE OF docs.
-
-    DATA wa_response_entity_body TYPE docs.
-
-
-    cl_http_client=>create_by_url( EXPORTING url = CONV string( i_absolute_uri )
-                                             ssl_id = 'DFAULT'  " use SSLC
-                                   IMPORTING client = DATA(http_client) ).
-    http_client->request->set_method( if_http_request=>co_request_method_get ).
-    http_client->send( EXPORTING  timeout                    = if_http_client=>co_timeout_default
-                       EXCEPTIONS http_communication_failure = 1
-                                  http_invalid_state         = 2
-                                  http_processing_failed     = 3
-                                  http_invalid_timeout       = 4
-                                  OTHERS                     = 99 ).
-    IF sy-subrc = 0.
-
-      http_client->receive( EXCEPTIONS http_communication_failure = 1
-                                       http_invalid_state         = 2
-                                       http_processing_failed     = 3
-                                       OTHERS                     = 99 ).
-    ENDIF.
-    IF sy-subrc > 0.
-      CASE sy-subrc.
-        WHEN 1.
-          DATA(msg) = |HTTP communication error|.
-        WHEN 2.
-          msg = |HTTP invalid state|.
-        WHEN 3.
-          msg = |HTTP processing failed|.
-        WHEN 4.
-          msg = |HTTP invalid timeout|.
-        WHEN OTHERS.
-          msg = |Unknown error|.
-      ENDCASE.
-      RAISE EXCEPTION TYPE lcx_error
-        EXPORTING
-          iv_msg = |Could not establish a connection to { i_absolute_uri }:| &&
-                   msg && |Please check the SMICM trace for more details.| ##NO_TEXT.
-    ENDIF.
-
-
-    DATA(response) = http_client->response.
-    response->get_status( IMPORTING code = status_code reason = status_text ).
-    r_response_body = response->get_data( ).
-
-    IF status_code >= 299.
-      RAISE EXCEPTION TYPE lcx_error
-        EXPORTING
-          iv_msg = |HTTP error { status_text }({ status_code }) when attempting GET from { i_absolute_uri }.| &&
-                   |Please check the SMICM log for SSL errors such as untrusted certificates| ##NO_TEXT.
-    ENDIF.
-
-  ENDMETHOD.
-
-  METHOD lif_internet_manager~has_internet_access.
-
-    DATA result TYPE abap_bool.
-    DATA http_client TYPE REF TO if_http_client.
-    DATA reason TYPE string.
-    DATA url TYPE string.
-    DATA http_rc TYPE i.
-    DATA status_text TYPE string.
-
-    result = abap_false.
-
-    url = lif_internet_manager~c_url_internet_check.
-
-    TRY.
-        cl_http_client=>create_by_url( EXPORTING url = url IMPORTING client = http_client ).
-
-        http_client->request->set_method( if_http_request=>co_request_method_get ).
-
-        http_client->send( timeout = if_http_client=>co_timeout_default ).
-
-        http_client->receive( EXCEPTIONS http_communication_failure = 1
-                                         http_invalid_state         = 2
-                                         http_processing_failed     = 3
-                                         OTHERS                     = 4 ).
-
-        IF sy-subrc <> 0.
-          result = abap_false.
-        ELSE.
-          result = abap_true.
-        ENDIF.
-
-      CATCH cx_root INTO DATA(ex).
-        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = ex->get_text( ).
-    ENDTRY.
-
-    r_result = result.
-  ENDMETHOD.
-
-ENDCLASS.
-
-
-
-
-INTERFACE lif_report_update_manager.
-
-  CONSTANTS: c_url_github_raw TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/%23awslabs%23sdk_installer.prog.abap'.
-
-  METHODS:
-    is_update_available RETURNING VALUE(r_result) TYPE boolean
-                        RAISING   lcx_error,
-    update_report RAISING lcx_error.
-
-ENDINTERFACE.
-
-
-CLASS lcl_report_update_manager DEFINITION.
-
-  PUBLIC SECTION.
-    INTERFACES:
-      lif_report_update_manager.
-
-    METHODS:
-      constructor IMPORTING i_internet_manager TYPE REF TO lif_internet_manager OPTIONAL.
-
-  PRIVATE SECTION.
-    DATA: internet_manager TYPE REF TO lif_internet_manager.
-    DATA: report_github_cached TYPE xstring.
-
-    METHODS:
-      download_report IMPORTING i_url_github_raw        TYPE w3_url
-                      RETURNING VALUE(r_report_xstring) TYPE xstring
-                      RAISING   lcx_error,
-      write_report_update RAISING   lcx_error.
-
-ENDCLASS.
-
-
-CLASS lcl_report_update_manager IMPLEMENTATION.
-
-
-  METHOD constructor.
-    IF i_internet_manager IS BOUND.
-      internet_manager = i_internet_manager.
-    ELSE.
-      internet_manager = NEW lcl_internet_manager( ).
-    ENDIF.
-  ENDMETHOD.
-
-  METHOD lif_report_update_manager~update_report.
-    IF report_github_cached IS NOT INITIAL.
-      write_report_update( ).
-    ELSE.
-      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Check for update first!| ##NO_TEXT..
-    ENDIF.
-  ENDMETHOD.
-
-
-  METHOD lif_report_update_manager~is_update_available.
-
-    DATA: report_local TYPE xstring.
-    DATA: report_local_stringtab TYPE TABLE OF string.
-    DATA: report_local_string TYPE string.
-
-    " retrieve current version from github, store it in private instance variable
-    TRY.
-        report_github_cached = download_report( i_url_github_raw = lif_report_update_manager~c_url_github_raw ).
-      CATCH lcx_error INTO DATA(ex1).
-        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = ex1->get_text( ).
-    ENDTRY.
-
-    " read local report version as xstring
-    TRY.
-        READ REPORT sy-repid INTO report_local_stringtab.
-        CONCATENATE LINES OF report_local_stringtab INTO report_local_string SEPARATED BY cl_abap_char_utilities=>newline.
-        report_local = cl_abap_conv_codepage=>create_out( )->convert( source = report_local_string ).
-      CATCH cx_root INTO DATA(ex2).
-        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = ex2->get_text( ).
-    ENDTRY.
-
-    r_result = xsdbool( report_local <> report_github_cached ).
-
-  ENDMETHOD.
-
-
-  METHOD download_report.
-    TRY.
-        r_report_xstring = internet_manager->download( i_absolute_uri = i_url_github_raw
-                                                       i_blankstocrlf = abap_false ).
-      CATCH lcx_error INTO DATA(ex).
-        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = ex->get_text( ).
-    ENDTRY.
-  ENDMETHOD.
-
-
-  METHOD write_report_update.
-
-    " Safety check, if the cached version is still initial, do not overwrite
-    IF report_github_cached IS INITIAL.
-      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Report content is empty!| ##NO_TEXT..
-    ENDIF.
-
-    TRY.
-        DATA(report_string) = cl_abap_conv_codepage=>create_in( )->convert( source = report_github_cached ).
-      CATCH cx_root INTO DATA(ex).
-        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = ex->get_text( ).
-    ENDTRY.
-
-    SPLIT report_string AT cl_abap_char_utilities=>newline INTO TABLE DATA(report_stringtab).
-
-    INSERT REPORT sy-repid FROM report_stringtab.
-
-    IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Failed to write report update!| ##NO_TEXT..
-    ENDIF.
-
-
-  ENDMETHOD.
-
-ENDCLASS.
-
-
-
 CLASS lcl_utils DEFINITION FINAL.
 
   PUBLIC SECTION.
@@ -373,9 +125,14 @@ CLASS lcl_utils DEFINITION FINAL.
       get_client_role IMPORTING i_client        TYPE mandt
                       RETURNING VALUE(r_result) TYPE cccategory,
       get_system_name RETURNING VALUE(r_sysnam) TYPE tmssysnam,
-      has_prod_client RETURNING VALUE(r_result) TYPE abap_bool.
-
-
+      get_parameter IMPORTING iv_param        TYPE string
+                    RETURNING VALUE(rv_value) TYPE string
+                    RAISING   lcx_error,
+      has_prod_client RETURNING VALUE(r_result) TYPE abap_bool,
+      binary_to_xstring IMPORTING it_bintab         TYPE table
+                                  iv_length         TYPE i
+                        RETURNING VALUE(ov_xstring) TYPE xstring
+                        RAISING   lcx_error.
 ENDCLASS.
 
 
@@ -456,10 +213,297 @@ CLASS lcl_utils IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD binary_to_xstring.
+    CALL FUNCTION 'SCMS_BINARY_TO_XSTRING'
+      EXPORTING
+        input_length = iv_length
+      IMPORTING
+        buffer       = ov_xstring
+      TABLES
+        binary_tab   = it_bintab
+      EXCEPTIONS
+        failed       = 1
+        OTHERS       = 2.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not convert bin table to xstring| ##NO_TEXT.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD get_parameter.
+    DATA lv_value TYPE pfepvalue.
+    DATA lv_rc TYPE i.
+
+
+    CALL FUNCTION 'TH_GET_PARAMETER'
+      EXPORTING
+        parameter_name  = CONV pfeparname( iv_param )
+      IMPORTING
+        parameter_value = lv_value
+        rc              = lv_rc
+      EXCEPTIONS
+        not_authorized  = 1
+        OTHERS          = 2.
+
+    IF lv_rc <> 0 OR sy-subrc <> 0.
+      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not determine parameter { iv_param }| ##NO_TEXT.
+    ENDIF.
+    rv_value = lv_value.
+  ENDMETHOD.
+
 ENDCLASS.
 
 
-INTERFACE lif_certificate_manager.
+
+INTERFACE lif_sdk_internet_manager.
+
+  CONSTANTS: c_url_internet_check TYPE w3_url VALUE 'http://ocsp.r2m02.amazontrust.com'.
+
+  METHODS:
+    download IMPORTING i_absolute_uri         TYPE w3_url
+                       i_blankstocrlf         TYPE boolean
+             RETURNING VALUE(r_response_body) TYPE xstring
+             RAISING   lcx_error,
+    has_internet_access
+      RETURNING VALUE(r_result) TYPE abap_bool
+      RAISING   lcx_error.
+
+ENDINTERFACE.
+
+
+CLASS lcl_sdk_internet_manager DEFINITION.
+
+  PUBLIC SECTION.
+    INTERFACES:
+      lif_sdk_internet_manager.
+
+ENDCLASS.
+
+CLASS lcl_sdk_internet_manager IMPLEMENTATION.
+
+  METHOD lif_sdk_internet_manager~download.
+
+    DATA status_code TYPE i.
+    DATA status_text TYPE string.
+    DATA response_entity_body_length TYPE i.
+
+    DATA request_entity_body TYPE STANDARD TABLE OF docs.
+    DATA request_headers TYPE STANDARD TABLE OF docs.
+    DATA response_entity_body TYPE STANDARD TABLE OF docs.
+    DATA response_headers TYPE STANDARD TABLE OF docs.
+
+    DATA wa_response_entity_body TYPE docs.
+
+
+    cl_http_client=>create_by_url( EXPORTING url = CONV string( i_absolute_uri )
+                                             ssl_id = 'DFAULT'  " use SSLC
+                                   IMPORTING client = DATA(http_client) ).
+    http_client->request->set_method( if_http_request=>co_request_method_get ).
+    http_client->send( EXPORTING  timeout                    = if_http_client=>co_timeout_default
+                       EXCEPTIONS http_communication_failure = 1
+                                  http_invalid_state         = 2
+                                  http_processing_failed     = 3
+                                  http_invalid_timeout       = 4
+                                  OTHERS                     = 99 ).
+    IF sy-subrc = 0.
+
+      http_client->receive( EXCEPTIONS http_communication_failure = 1
+                                       http_invalid_state         = 2
+                                       http_processing_failed     = 3
+                                       OTHERS                     = 99 ).
+    ENDIF.
+    IF sy-subrc > 0.
+      CASE sy-subrc.
+        WHEN 1.
+          DATA(msg) = |HTTP communication error|.
+        WHEN 2.
+          msg = |HTTP invalid state|.
+        WHEN 3.
+          msg = |HTTP processing failed|.
+        WHEN 4.
+          msg = |HTTP invalid timeout|.
+        WHEN OTHERS.
+          msg = |Unknown error|.
+      ENDCASE.
+      RAISE EXCEPTION TYPE lcx_error
+        EXPORTING
+          iv_msg = |Could not establish a connection to { i_absolute_uri }:| &&
+                   msg && |Please check the SMICM trace for more details.| ##NO_TEXT.
+    ENDIF.
+
+
+    DATA(response) = http_client->response.
+    response->get_status( IMPORTING code = status_code reason = status_text ).
+    r_response_body = response->get_data( ).
+
+    IF status_code >= 299.
+      RAISE EXCEPTION TYPE lcx_error
+        EXPORTING
+          iv_msg = |HTTP error { status_text }({ status_code }) when attempting GET from { i_absolute_uri }.| &&
+                   |Please check the SMICM log for SSL errors such as untrusted certificates| ##NO_TEXT.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD lif_sdk_internet_manager~has_internet_access.
+
+    DATA result TYPE abap_bool.
+    DATA http_client TYPE REF TO if_http_client.
+    DATA reason TYPE string.
+    DATA url TYPE string.
+    DATA http_rc TYPE i.
+    DATA status_text TYPE string.
+
+    result = abap_false.
+
+    url = lif_sdk_internet_manager~c_url_internet_check.
+
+    TRY.
+        cl_http_client=>create_by_url( EXPORTING url = url IMPORTING client = http_client ).
+
+        http_client->request->set_method( if_http_request=>co_request_method_get ).
+
+        http_client->send( timeout = if_http_client=>co_timeout_default ).
+
+        http_client->receive( EXCEPTIONS http_communication_failure = 1
+                                         http_invalid_state         = 2
+                                         http_processing_failed     = 3
+                                         OTHERS                     = 4 ).
+
+        IF sy-subrc <> 0.
+          result = abap_false.
+        ELSE.
+          result = abap_true.
+        ENDIF.
+
+      CATCH cx_root INTO DATA(ex).
+        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = ex->get_text( ).
+    ENDTRY.
+
+    r_result = result.
+  ENDMETHOD.
+
+ENDCLASS.
+
+
+INTERFACE lif_sdk_report_update_manager.
+
+  CONSTANTS: c_url_github_raw TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/%23awslabs%23sdk_installer.prog.abap'.
+
+  METHODS:
+    is_update_available RETURNING VALUE(r_result) TYPE boolean
+                        RAISING   lcx_error,
+    update_report RAISING lcx_error.
+
+ENDINTERFACE.
+
+
+CLASS lcl_sdk_report_update_manager DEFINITION.
+
+  PUBLIC SECTION.
+    INTERFACES:
+      lif_sdk_report_update_manager.
+
+    METHODS:
+      constructor IMPORTING i_sdk_internet_manager TYPE REF TO lif_sdk_internet_manager OPTIONAL.
+
+  PRIVATE SECTION.
+    DATA: internet_manager TYPE REF TO lif_sdk_internet_manager.
+    DATA: report_github_cached TYPE xstring.
+
+    METHODS:
+      download_report IMPORTING i_url_github_raw        TYPE w3_url
+                      RETURNING VALUE(r_report_xstring) TYPE xstring
+                      RAISING   lcx_error,
+      write_report_update RAISING   lcx_error.
+
+ENDCLASS.
+
+
+CLASS lcl_sdk_report_update_manager IMPLEMENTATION.
+
+
+  METHOD constructor.
+    IF i_sdk_internet_manager IS BOUND.
+      internet_manager = i_sdk_internet_manager.
+    ELSE.
+      internet_manager = NEW lcl_sdk_internet_manager( ).
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD lif_sdk_report_update_manager~update_report.
+    IF report_github_cached IS NOT INITIAL.
+      write_report_update( ).
+    ELSE.
+      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Check for update first!| ##NO_TEXT..
+    ENDIF.
+  ENDMETHOD.
+
+
+  METHOD lif_sdk_report_update_manager~is_update_available.
+
+    DATA: report_local TYPE xstring.
+    DATA: report_local_stringtab TYPE TABLE OF string.
+    DATA: report_local_string TYPE string.
+
+    " retrieve current version from github, store it in private instance variable
+    TRY.
+        report_github_cached = download_report( i_url_github_raw = lif_sdk_report_update_manager~c_url_github_raw ).
+      CATCH lcx_error INTO DATA(ex1).
+        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = ex1->get_text( ).
+    ENDTRY.
+
+    " read local report version as xstring
+    TRY.
+        READ REPORT sy-repid INTO report_local_stringtab.
+        CONCATENATE LINES OF report_local_stringtab INTO report_local_string SEPARATED BY cl_abap_char_utilities=>newline.
+        report_local = cl_abap_conv_codepage=>create_out( )->convert( source = report_local_string ).
+      CATCH cx_root INTO DATA(ex2).
+        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = ex2->get_text( ).
+    ENDTRY.
+
+    r_result = xsdbool( report_local <> report_github_cached ).
+
+  ENDMETHOD.
+
+
+  METHOD download_report.
+    TRY.
+        r_report_xstring = internet_manager->download( i_absolute_uri = i_url_github_raw
+                                                       i_blankstocrlf = abap_false ).
+      CATCH lcx_error INTO DATA(ex).
+        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = ex->get_text( ).
+    ENDTRY.
+  ENDMETHOD.
+
+
+  METHOD write_report_update.
+
+    " Safety check, if the cached version is still initial, do not overwrite
+    IF report_github_cached IS INITIAL.
+      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Report content is empty!| ##NO_TEXT..
+    ENDIF.
+
+    TRY.
+        DATA(report_string) = cl_abap_conv_codepage=>create_in( )->convert( source = report_github_cached ).
+      CATCH cx_root INTO DATA(ex).
+        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = ex->get_text( ).
+    ENDTRY.
+
+    SPLIT report_string AT cl_abap_char_utilities=>newline INTO TABLE DATA(report_stringtab).
+
+    INSERT REPORT sy-repid FROM report_stringtab.
+
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Failed to write report update!| ##NO_TEXT..
+    ENDIF.
+
+
+  ENDMETHOD.
+
+ENDCLASS.
+
+
+INTERFACE lif_sdk_certificate_manager.
 
   TYPES: BEGIN OF ts_amazon_root_certificate,
            subject   TYPE string,
@@ -477,21 +521,21 @@ INTERFACE lif_certificate_manager.
 ENDINTERFACE.
 
 
-CLASS lcl_certificate_manager DEFINITION FINAL.
+CLASS lcl_sdk_certificate_manager DEFINITION FINAL.
 
   PUBLIC SECTION.
     INTERFACES:
-      lif_certificate_manager.
+      lif_sdk_certificate_manager.
 
     METHODS:
-      constructor IMPORTING i_internet_manager TYPE REF TO lif_internet_manager OPTIONAL,
+      constructor IMPORTING i_sdk_internet_manager TYPE REF TO lif_sdk_internet_manager OPTIONAL,
       set_amazon_root_cert_values,
       set_amazon_root_cert_status RAISING lcx_error,
       setup_certificates RETURNING VALUE(r_result) TYPE abap_bool RAISING lcx_error.
 
   PRIVATE SECTION.
-    DATA: internet_manager TYPE REF TO lif_internet_manager.
-    DATA: mt_amazon_root_certs TYPE lif_certificate_manager~tt_amazon_root_certificate. " populated in set_amazon_root_cert_values
+    DATA: internet_manager TYPE REF TO lif_sdk_internet_manager.
+    DATA: mt_amazon_root_certs TYPE lif_sdk_certificate_manager~tt_amazon_root_certificate. " populated in set_amazon_root_cert_values
 
     METHODS:
       check_bapiret
@@ -501,14 +545,14 @@ CLASS lcl_certificate_manager DEFINITION FINAL.
 ENDCLASS.
 
 
-CLASS lcl_certificate_manager IMPLEMENTATION.
+CLASS lcl_sdk_certificate_manager IMPLEMENTATION.
 
   METHOD constructor.
 
-    IF i_internet_manager IS BOUND.
-      internet_manager = i_internet_manager.
+    IF i_sdk_internet_manager IS BOUND.
+      internet_manager = i_sdk_internet_manager.
     ELSE.
-      internet_manager = NEW lcl_internet_manager( ).
+      internet_manager = NEW lcl_sdk_internet_manager( ).
     ENDIF.
 
   ENDMETHOD.
@@ -530,7 +574,7 @@ CLASS lcl_certificate_manager IMPLEMENTATION.
 
   METHOD setup_certificates.
 
-    DATA lt_missing_certs TYPE lif_certificate_manager~tt_amazon_root_certificate.
+    DATA lt_missing_certs TYPE lif_sdk_certificate_manager~tt_amazon_root_certificate.
     LOOP AT mt_amazon_root_certs INTO DATA(wa_amazon_root_cert).
       IF wa_amazon_root_cert-installed = abap_false AND sy-tabix > 4.
         APPEND wa_amazon_root_cert TO lt_missing_certs.
@@ -573,7 +617,7 @@ CLASS lcl_certificate_manager IMPLEMENTATION.
       ENDIF.
 
       IF lv_answer = 1.
-        lif_certificate_manager~install_amazon_root_certs( ).
+        lif_sdk_certificate_manager~install_amazon_root_certs( ).
       ELSE.
         LEAVE PROGRAM.
       ENDIF.
@@ -627,7 +671,7 @@ CLASS lcl_certificate_manager IMPLEMENTATION.
     DATA ls_strust_identity TYPE ssf_s_strust_identity.
     DATA lt_certificatelist TYPE ssfbintab.
     DATA wa_certificate_binary TYPE LINE OF ssfbintab.
-    DATA wa_amazon_root_cert TYPE lif_certificate_manager~ts_amazon_root_certificate.
+    DATA wa_amazon_root_cert TYPE lif_sdk_certificate_manager~ts_amazon_root_certificate.
     DATA lt_bapiret2 TYPE STANDARD TABLE OF bapiret2.
 
 
@@ -687,9 +731,9 @@ CLASS lcl_certificate_manager IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD lif_certificate_manager~install_amazon_root_certs.
+  METHOD lif_sdk_certificate_manager~install_amazon_root_certs.
 
-    DATA wa_amazon_root_cert TYPE lif_certificate_manager~ts_amazon_root_certificate.
+    DATA wa_amazon_root_cert TYPE lif_sdk_certificate_manager~ts_amazon_root_certificate.
 
     DATA ls_strust_identity TYPE ssf_s_strust_identity.
     DATA lt_bapiret2 TYPE STANDARD TABLE OF bapiret2.
@@ -767,66 +811,27 @@ CLASS lcl_certificate_manager IMPLEMENTATION.
 ENDCLASS.
 
 
+INTERFACE lif_sdk_file_manager.
+
+  CONSTANTS:
+    c_trans_logical_path         TYPE filepath-pathintern VALUE 'ASSEMBLY' ##NO_TEXT,
+    c_logsubdir_name             TYPE fileintern VALUE 'BC_RSTEXTA3' ##NO_TEXT,
+    c_download_uri_prefix        TYPE string VALUE '://sdk-for-sapabap.aws.amazon.com/awsSdkSapabapV' ##NO_TEXT,
+    c_abapsdk_inst_file_prefix   TYPE string VALUE 'abapsdk-' ##NO_TEXT,
+    c_abapsdk_uninst_file_prefix TYPE string VALUE 'uninstall-abapsdk-' ##NO_TEXT,
+    c_sdk_index_json_zip_path    TYPE string VALUE 'META-INF/sdk_index.json' ##NO_TEXT,
+    c_transports_zip_path        TYPE string VALUE 'transports/' ##NO_TEXT.
 
 
-CLASS lcl_abapsdk_package_manager DEFINITION FINAL FRIENDS lcl_abapsdk_pm_tree_controller.
+ENDINTERFACE.
 
-
+CLASS lcl_sdk_file_manager DEFINITION.
 
   PUBLIC SECTION.
-
-    DATA:
-      mt_abapsdk_zipfiles         TYPE tt_abapsdk_zip,
-      m_sdk_index_json_zip_path   TYPE string READ-ONLY,
-      m_transports_zip_path       TYPE w3_url READ-ONLY,
-      m_sdk_index_json_uri        TYPE w3_url READ-ONLY,
-      mt_available_modules_inst   TYPE tt_abapsdk_module,   " available modules for installation  (i.e. install transports)
-      mt_available_modules_uninst TYPE tt_abapsdk_module.   " available modules for uninstallation (i.e. uninstall transports)
-
+    INTERFACES:
+      lif_sdk_file_manager.
 
     METHODS:
-      constructor IMPORTING i_batch_mode TYPE syst-batch OPTIONAL
-                  RAISING   lcx_error,
-      install_all_modules IMPORTING it_modules_to_be_installed TYPE tt_abapsdk_tla
-                                    it_modules_to_be_deleted   TYPE tt_abapsdk_tla
-                          RETURNING VALUE(r_jobnumber)         TYPE btcjobcnt
-                          RAISING   lcx_error,
-      download_abapsdk_zipfiles IMPORTING i_file_list      TYPE tt_abapsdk_zip
-                                          i_version        TYPE string DEFAULT 'LATEST'
-                                RETURNING VALUE(r_success) TYPE abap_bool
-                                RAISING   lcx_error,
-      get_file_from_zip IMPORTING i_zipfile_absolute_path TYPE string
-                                  i_file_to_retrieve      TYPE string
-                        RETURNING VALUE(r_file_xstring)   TYPE xstring,
-      get_abapsdk_installed_modules RETURNING VALUE(r_installed_modules) TYPE tt_abapsdk_module
-                                    RAISING   lcx_error,
-      get_abapsdk_deprecated_mod_ins RETURNING VALUE(r_deprecated_modules) TYPE tt_abapsdk_module,
-      get_abapsdk_avail_modules_json IMPORTING i_operation                TYPE string
-                                               i_source                   TYPE string
-                                               i_version                  TYPE string DEFAULT 'LATEST'
-                                     RETURNING VALUE(r_available_modules) TYPE tt_abapsdk_module
-                                     RAISING   lcx_error,
-      get_abapsdk_transport_cofile IMPORTING i_tla         TYPE ts_abapsdk_module-tla
-                                             i_transport   TYPE ts_abapsdk_module-atransport
-                                             i_operation   TYPE string
-                                             i_version     TYPE string
-                                   EXPORTING e_cofile_name TYPE string
-                                             e_cofile_blob TYPE xstring,
-      get_abapsdk_transport_datafile IMPORTING i_tla           TYPE ts_abapsdk_module-tla
-                                               i_transport     TYPE ts_abapsdk_module-atransport
-                                               i_operation     TYPE string
-                                               i_version       TYPE string
-                                     EXPORTING e_datafile_name TYPE string
-                                               e_datafile_blob TYPE xstring,
-      write_abapsdk_transport_trdir IMPORTING i_cofile_name    TYPE string
-                                              i_datafile_name  TYPE string
-                                              i_cofile_blob    TYPE xstring
-                                              i_datafile_blob  TYPE xstring
-                                    RETURNING VALUE(r_success) TYPE boolean
-                                    RAISING   lcx_error,
-      import_abapsdk_transports IMPORTING it_transport_names TYPE stms_tr_requests
-                                EXPORTING e_tp_retcode       TYPE stpa-retcode
-                                          es_exception       TYPE stmscalert,
       build_download_uri_prefix IMPORTING i_protocol      TYPE string DEFAULT 'https'
                                           i_major_version TYPE string DEFAULT '1'
                                           i_branch        TYPE string DEFAULT 'release'
@@ -843,88 +848,32 @@ CLASS lcl_abapsdk_package_manager DEFINITION FINAL FRIENDS lcl_abapsdk_pm_tree_c
                          RAISING   lcx_error,
       validate_zipfile_path IMPORTING i_zipfile_path   TYPE string
                                       i_logsubdir_name TYPE fileintern
-                            RETURNING VALUE(r_result)  TYPE abap_bool ,
-      get_running_jobs IMPORTING i_jobname       TYPE syst_repi2
-                       RETURNING VALUE(r_result) TYPE tbtcjob_tt,
-      run_foreground IMPORTING i_modules_to_be_installed TYPE tt_abapsdk_tla
-                               i_modules_to_be_deleted   TYPE tt_abapsdk_tla
-                               i_target_version          TYPE string
-                     EXPORTING e_tp_rc_inst              TYPE stpa-retcode
-                               es_exception_inst         TYPE stmscalert
-                               e_tp_rc_uninst            TYPE stpa-retcode
-                               es_exception_uninst       TYPE stmscalert
-                     RAISING   lcx_error,
-      run_background RAISING   lcx_error,
-      submit_batch_job IMPORTING i_modules_to_be_installed TYPE tt_abapsdk_tla
-                                 i_modules_to_be_deleted   TYPE tt_abapsdk_tla
-                                 i_target_version          TYPE string
-                       RETURNING VALUE(r_result)           TYPE tbtco-jobcount
-                       RAISING   lcx_error,
-      is_job_running RETURNING VALUE(r_result) TYPE abap_bool,
-
+                            RETURNING VALUE(r_result)  TYPE abap_bool,
       check_file_writable_at IMPORTING i_path          TYPE string
                              RETURNING VALUE(r_result) TYPE abap_bool,
       check_file_exists_at IMPORTING i_path          TYPE string
                            RETURNING VALUE(r_result) TYPE abap_bool,
-      check_abapsdk_zipfile_exists IMPORTING i_operation     TYPE string
-                                             i_version       TYPE string
-                                   RETURNING VALUE(r_result) TYPE abap_bool,
-      check_abapsdk_zipfiles_present
-        IMPORTING i_version       TYPE string DEFAULT 'LATEST'
-        RETURNING VALUE(r_result) TYPE abap_bool
+      open_for_input
+        IMPORTING iv_filename TYPE clike
         RAISING   lcx_error,
-      check_abapsdk_zipfiles_current
-        RETURNING VALUE(r_result) TYPE abap_bool
+      open_for_output
+        IMPORTING iv_filename TYPE clike
         RAISING   lcx_error,
-      update_abapsdk_zipfile_paths.
-
-
-
-  PROTECTED SECTION.
+      raise_lpath_exception
+        IMPORTING iv_filename TYPE string
+        RAISING   lcx_error .
 
   PRIVATE SECTION.
 
-    DATA: internet_manager TYPE REF TO lif_internet_manager.
-    DATA: certificate_manager TYPE REF TO lcl_certificate_manager. " TODO: Refactor so this can be changed to lif_certificate_manager
 
-    CONSTANTS c_trans_logical_path TYPE filepath-pathintern VALUE 'ASSEMBLY'.
-    CONSTANTS c_logsubdir_name TYPE fileintern VALUE 'BC_RSTEXTA3'.
-    CONSTANTS c_download_uri_prefix TYPE string VALUE '://sdk-for-sapabap.aws.amazon.com/awsSdkSapabapV'.
-    CONSTANTS c_abapsdk_inst_file_prefix TYPE string VALUE 'abapsdk-'.
-    CONSTANTS c_abapsdk_uninst_file_prefix TYPE string VALUE 'uninstall-abapsdk-'.
-
-    METHODS get_parameter
-      IMPORTING iv_param        TYPE string
-      RETURNING VALUE(rv_value) TYPE string
-      RAISING   lcx_error.
-
-    METHODS open_for_input
-      IMPORTING iv_filename TYPE clike
-      RAISING   lcx_error.
-
-    METHODS open_for_output
-      IMPORTING iv_filename TYPE clike
-      RAISING   lcx_error.
-
-
-    METHODS binary_to_xstring
-      IMPORTING it_bintab         TYPE table
-                iv_length         TYPE i
-      RETURNING VALUE(ov_xstring) TYPE xstring
-      RAISING   lcx_error.
-    METHODS raise_lpath_exception
-      IMPORTING iv_filename TYPE string
-      RAISING   lcx_error .
 
 ENDCLASS.
 
-
-
-CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
+CLASS lcl_sdk_file_manager IMPLEMENTATION.
 
   METHOD build_download_uri_prefix.
 
-    r_result = |{ i_protocol }{ c_download_uri_prefix }{ i_major_version }/{ i_branch }/| ##NO_TEXT..
+    r_result = |{ i_protocol }{ lif_sdk_file_manager~c_download_uri_prefix }{ i_major_version }/{ i_branch }/| ##NO_TEXT..
 
   ENDMETHOD.
 
@@ -932,9 +881,9 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
 
     CASE i_operation.
       WHEN 'install'.
-        r_result = |{ c_abapsdk_inst_file_prefix }{ i_version }.zip| ##NO_TEXT..
+        r_result = |{ lif_sdk_file_manager~c_abapsdk_inst_file_prefix }{ i_version }.zip| ##NO_TEXT..
       WHEN 'uninstall'.
-        r_result = |{ c_abapsdk_uninst_file_prefix }{ i_version }.zip| ##NO_TEXT..
+        r_result = |{ lif_sdk_file_manager~c_abapsdk_uninst_file_prefix }{ i_version }.zip| ##NO_TEXT..
       WHEN OTHERS.
 
     ENDCASE.
@@ -946,9 +895,9 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
 
     CASE i_operation.
       WHEN 'install'.
-        r_result = |{ c_abapsdk_inst_file_prefix }{ i_version }.json| ##NO_TEXT..
+        r_result = |{ lif_sdk_file_manager~c_abapsdk_inst_file_prefix }{ i_version }.json| ##NO_TEXT..
       WHEN 'uninstall'.
-        r_result = |{ c_abapsdk_uninst_file_prefix }{ i_version }.json| ##NO_TEXT..
+        r_result = |{ lif_sdk_file_manager~c_abapsdk_uninst_file_prefix }{ i_version }.json| ##NO_TEXT..
       WHEN OTHERS.
 
     ENDCASE.
@@ -1003,31 +952,374 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
 
 
 
+  METHOD check_file_writable_at.
+    TRY.
+        open_for_output( i_path ).
+        CLOSE DATASET i_path.
+        r_result = abap_true.
+      CATCH lcx_error INTO DATA(lo_ex).
+        MESSAGE |Path { i_path } not writable, reason: { lo_ex->av_msg }| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
+    ENDTRY.
+  ENDMETHOD.
+
+
+  METHOD check_file_exists_at.
+
+    DATA(lv_path) = CONV pfebackuppro( i_path ).
+    CALL FUNCTION 'PFL_CHECK_OS_FILE_EXISTENCE'
+      EXPORTING
+        long_filename         = lv_path
+      IMPORTING
+        file_exists           = r_result
+      EXCEPTIONS
+        authorization_missing = 1
+        OTHERS                = 2.
+
+    CASE sy-subrc.
+      WHEN 0.
+        " all good
+      WHEN 1.
+        RAISE EXCEPTION TYPE cx_sy_file_authority.
+      WHEN 2.
+        RAISE EXCEPTION TYPE cx_sy_file_io. " TODO: Find/Create more appropriate exception for generic case
+    ENDCASE.
+
+  ENDMETHOD.
+
+
+  METHOD open_for_input.
+    DATA lv_os_msg TYPE text255.
+    OPEN DATASET iv_filename FOR INPUT IN BINARY MODE MESSAGE lv_os_msg.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE lcx_error
+        EXPORTING
+          iv_msg = |Error opening { iv_filename }: { lv_os_msg }| ##NO_TEXT.
+    ENDIF.
+  ENDMETHOD.
+
+
+  METHOD open_for_output.
+    DATA(lv_filename_to_check) = CONV fileextern( iv_filename ).
+    AUTHORITY-CHECK OBJECT 'S_DATASET'
+      ID 'PROGRAM' FIELD sy-repid
+      ID 'ACTVT' FIELD '34'
+      ID 'FILENAME' FIELD lv_filename_to_check ##AUTH_FLD_LEN.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE lcx_error
+        EXPORTING
+          iv_msg = |No permission to write to { iv_filename }| ##NO_TEXT.
+    ENDIF.
+
+    DATA lv_os_msg TYPE text255.
+    OPEN DATASET iv_filename FOR OUTPUT IN BINARY MODE MESSAGE lv_os_msg.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE lcx_error
+        EXPORTING
+          iv_msg = |Error opening { iv_filename }: { lv_os_msg }| ##NO_TEXT.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD raise_lpath_exception.
+    RAISE EXCEPTION TYPE lcx_error
+      EXPORTING
+        iv_msg = |Could not determine location to save { iv_filename }. | &&
+                 |Please maintain logical path { lif_sdk_file_manager~c_trans_logical_path } in transaction FILE | &&
+                 |to point to physical path <P=DIR_TRANS>/<PARAM_1>/<FILENAME>| ##NO_TEXT.
+
+  ENDMETHOD.
+
+
+
+
+
+ENDCLASS.
+
+
+INTERFACE lif_sdk_tms_manager.
+
+ENDINTERFACE.
+
+CLASS lcl_sdk_tms_manager DEFINITION.
+
+  PUBLIC SECTION.
+    INTERFACES:
+      lif_sdk_tms_manager.
+
+    METHODS:
+      constructor IMPORTING i_file_manager TYPE REF TO lcl_sdk_file_manager OPTIONAL,
+      write_transport_trdir IMPORTING i_cofile_name    TYPE string  " TODO: Separate class for transport management
+                                      i_datafile_name  TYPE string
+                                      i_cofile_blob    TYPE xstring
+                                      i_datafile_blob  TYPE xstring
+                            RETURNING VALUE(r_success) TYPE boolean
+                            RAISING   lcx_error.
+
+  PRIVATE SECTION.
+    DATA:
+       file_manager TYPE REF TO lcl_sdk_file_manager.
+
+ENDCLASS.
+
+CLASS lcl_sdk_tms_manager IMPLEMENTATION.
+
+  METHOD constructor.
+
+    IF i_file_manager IS BOUND.
+      file_manager = i_file_manager.
+    ELSE.
+      file_manager = NEW lcl_sdk_file_manager( ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD write_transport_trdir.
+
+    DATA lv_rc TYPE i.
+    DATA lv_validation_active TYPE abap_bool.
+    DATA lv_filepath_cofile TYPE string.
+    DATA lv_filepath_datafile TYPE string.
+    DATA gv_file_name(255) TYPE c.
+
+
+
+    CALL FUNCTION 'FILE_GET_NAME_USING_PATH'
+      EXPORTING
+        client                     = sy-mandt
+        logical_path               = lif_sdk_file_manager=>c_trans_logical_path
+        operating_system           = sy-opsys
+        parameter_1                = 'cofiles'
+        file_name                  = i_cofile_name
+      IMPORTING
+        file_name_with_path        = lv_filepath_cofile
+      EXCEPTIONS
+        path_not_found             = 1
+        missing_parameter          = 2
+        operating_system_not_found = 3
+        file_system_not_found      = 4
+        OTHERS                     = 5.
+    IF sy-subrc <> 0.
+      file_manager->raise_lpath_exception( lv_filepath_cofile ).
+    ENDIF.
+
+
+    CALL FUNCTION 'FILE_VALIDATE_NAME'
+      EXPORTING
+        logical_filename  = lif_sdk_file_manager=>c_logsubdir_name
+        parameter_1       = 'cofiles'
+      CHANGING
+        physical_filename = lv_filepath_cofile
+      EXCEPTIONS
+        OTHERS            = 1.
+    IF sy-subrc <> 0.
+      MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+        WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+    ENDIF.
+
+
+
+    CALL FUNCTION 'FILE_GET_NAME_USING_PATH'
+      EXPORTING
+        client                     = sy-mandt
+        logical_path               = lif_sdk_file_manager=>c_trans_logical_path
+        operating_system           = sy-opsys
+        parameter_1                = 'data'
+        file_name                  = i_datafile_name
+      IMPORTING
+        file_name_with_path        = lv_filepath_datafile
+      EXCEPTIONS
+        path_not_found             = 1
+        missing_parameter          = 2
+        operating_system_not_found = 3
+        file_system_not_found      = 4
+        OTHERS                     = 5.
+    IF sy-subrc <> 0.
+      file_manager->raise_lpath_exception( i_datafile_name ).
+    ENDIF.
+
+    CALL FUNCTION 'FILE_VALIDATE_NAME'
+      EXPORTING
+        logical_filename  = lif_sdk_file_manager=>c_logsubdir_name
+        parameter_1       = 'data'
+      CHANGING
+        physical_filename = lv_filepath_datafile
+      EXCEPTIONS
+        OTHERS            = 1.
+    IF sy-subrc <> 0.
+      MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+        WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+    ENDIF.
+
+
+    TRY.
+        file_manager->open_for_output( lv_filepath_cofile ).
+        TRANSFER i_cofile_blob TO lv_filepath_cofile.
+        CLOSE DATASET lv_filepath_cofile.
+
+        file_manager->open_for_output( lv_filepath_datafile ).
+        TRANSFER i_datafile_blob TO lv_filepath_datafile.
+        CLOSE DATASET lv_filepath_datafile.
+      CATCH cx_sy_file_authority INTO DATA(r_ex1).
+        MESSAGE r_ex1->get_text( ) TYPE 'I' DISPLAY LIKE 'E'.
+        RETURN.
+      CATCH cx_sy_file_access_error INTO DATA(r_ex2).
+        MESSAGE r_ex2->get_text( ) TYPE 'I' DISPLAY LIKE 'E'.
+        RETURN.
+      CATCH cx_root INTO DATA(r_ex).
+        MESSAGE r_ex->get_text( ) TYPE 'I' DISPLAY LIKE 'E'.
+        RETURN.
+    ENDTRY.
+
+    r_success = abap_true.
+
+  ENDMETHOD.
+
+
+ENDCLASS.
+
+
+
+CLASS lcl_sdk_package_manager DEFINITION FINAL FRIENDS lcl_ui_tree_controller.
+
+  PUBLIC SECTION.
+
+    DATA:
+      mt_abapsdk_zipfiles         TYPE tt_abapsdk_zip,
+      mt_available_modules_inst   TYPE tt_abapsdk_module,   " available modules for installation  (i.e. install transports)
+      mt_available_modules_uninst TYPE tt_abapsdk_module.   " available modules for uninstallation (i.e. uninstall transports)
+
+
+    METHODS:
+      constructor IMPORTING i_batch_mode          TYPE syst-batch OPTIONAL
+                            i_internet_manager    TYPE REF TO lif_sdk_internet_manager OPTIONAL
+                            i_certificate_manager TYPE REF TO lcl_sdk_certificate_manager OPTIONAL
+                            i_file_manager        TYPE REF TO lcl_sdk_file_manager OPTIONAL
+                            i_tms_manager         TYPE REF TO lcl_sdk_tms_manager OPTIONAL
+                  RAISING   lcx_error,
+      install_all_modules IMPORTING it_modules_to_be_installed TYPE tt_abapsdk_tla
+                                    it_modules_to_be_deleted   TYPE tt_abapsdk_tla
+                          RETURNING VALUE(r_jobnumber)         TYPE btcjobcnt
+                          RAISING   lcx_error,
+      download_abapsdk_zipfiles IMPORTING i_file_list      TYPE tt_abapsdk_zip
+                                          i_version        TYPE string DEFAULT 'LATEST'
+                                RETURNING VALUE(r_success) TYPE abap_bool
+                                RAISING   lcx_error,
+      get_file_from_zip IMPORTING i_zipfile_absolute_path TYPE string
+                                  i_file_to_retrieve      TYPE string
+                        RETURNING VALUE(r_file_xstring)   TYPE xstring,
+      get_abapsdk_installed_modules RETURNING VALUE(r_installed_modules) TYPE tt_abapsdk_module
+                                    RAISING   lcx_error,
+      get_abapsdk_deprecated_mod_ins RETURNING VALUE(r_deprecated_modules) TYPE tt_abapsdk_module,
+      get_abapsdk_avail_modules_json IMPORTING i_operation                TYPE string
+                                               i_source                   TYPE string
+                                               i_version                  TYPE string DEFAULT 'LATEST'
+                                     RETURNING VALUE(r_available_modules) TYPE tt_abapsdk_module
+                                     RAISING   lcx_error,
+      get_abapsdk_transport_cofile IMPORTING i_tla         TYPE ts_abapsdk_module-tla
+                                             i_transport   TYPE ts_abapsdk_module-atransport
+                                             i_operation   TYPE string
+                                             i_version     TYPE string
+                                   EXPORTING e_cofile_name TYPE string
+                                             e_cofile_blob TYPE xstring,
+      get_abapsdk_transport_datafile IMPORTING i_tla           TYPE ts_abapsdk_module-tla
+                                               i_transport     TYPE ts_abapsdk_module-atransport
+                                               i_operation     TYPE string
+                                               i_version       TYPE string
+                                     EXPORTING e_datafile_name TYPE string
+                                               e_datafile_blob TYPE xstring,
+      import_abapsdk_transports IMPORTING it_transport_names TYPE stms_tr_requests
+                                EXPORTING e_tp_retcode       TYPE stpa-retcode
+                                          es_exception       TYPE stmscalert,
+      get_running_jobs IMPORTING i_jobname       TYPE syst_repi2
+                       RETURNING VALUE(r_result) TYPE tbtcjob_tt,
+      run_foreground IMPORTING i_modules_to_be_installed TYPE tt_abapsdk_tla
+                               i_modules_to_be_deleted   TYPE tt_abapsdk_tla
+                               i_target_version          TYPE string
+                     EXPORTING e_tp_rc_inst              TYPE stpa-retcode
+                               es_exception_inst         TYPE stmscalert
+                               e_tp_rc_uninst            TYPE stpa-retcode
+                               es_exception_uninst       TYPE stmscalert
+                     RAISING   lcx_error,
+      run_background RAISING   lcx_error,
+      submit_batch_job IMPORTING i_modules_to_be_installed TYPE tt_abapsdk_tla
+                                 i_modules_to_be_deleted   TYPE tt_abapsdk_tla
+                                 i_target_version          TYPE string
+                       RETURNING VALUE(r_result)           TYPE tbtco-jobcount
+                       RAISING   lcx_error,
+      is_job_running RETURNING VALUE(r_result) TYPE abap_bool,
+      check_abapsdk_zipfile_exists IMPORTING i_operation     TYPE string
+                                             i_version       TYPE string
+                                   RETURNING VALUE(r_result) TYPE abap_bool,
+      check_abapsdk_zipfiles_present
+        IMPORTING i_version       TYPE string DEFAULT 'LATEST'
+        RETURNING VALUE(r_result) TYPE abap_bool
+        RAISING   lcx_error,
+      check_abapsdk_zipfiles_current
+        RETURNING VALUE(r_result) TYPE abap_bool
+        RAISING   lcx_error,
+      update_abapsdk_zipfile_paths.
+
+
+
+  PROTECTED SECTION.
+
+  PRIVATE SECTION.
+
+    DATA: internet_manager TYPE REF TO lif_sdk_internet_manager.
+    DATA: certificate_manager TYPE REF TO lcl_sdk_certificate_manager. " TODO: Fix class so the interface can be used instead
+    DATA: file_manager TYPE REF TO lcl_sdk_file_manager. " TODO: Fix class so the interface can be used instead
+    DATA: tms_manager TYPE REF TO lcl_sdk_tms_manager. " TODO: interface instead of class
+
+ENDCLASS.
+
+
+
+CLASS lcl_sdk_package_manager IMPLEMENTATION.
+
   METHOD constructor.
 
     IF lcl_utils=>has_prod_client( ).
       MESSAGE |System has at least one productive client, please use TMS.| TYPE 'A' ##NO_TEXT.
     ENDIF.
 
-    internet_manager = NEW lcl_internet_manager( ).
-    certificate_manager = NEW lcl_certificate_manager( ).
+    IF i_internet_manager IS BOUND.
+      internet_manager = i_internet_manager.
+    ELSE.
+      internet_manager = NEW lcl_sdk_internet_manager( ).
+    ENDIF.
 
+    IF i_certificate_manager IS BOUND.
+      certificate_manager = i_certificate_manager.
+    ELSE.
+      certificate_manager = NEW lcl_sdk_certificate_manager( ).
+    ENDIF.
+
+    IF i_file_manager IS BOUND.
+      file_manager = i_file_manager.
+    ELSE.
+      file_manager =     file_manager = NEW lcl_sdk_file_manager( ).
+    ENDIF.
+
+    IF i_tms_manager IS BOUND.
+      tms_manager = i_tms_manager.
+    ELSE.
+      tms_manager = NEW lcl_sdk_tms_manager( ).
+    ENDIF.
 
     DATA wa_zipfile_inst TYPE ts_abapsdk_zip.
     wa_zipfile_inst-op = 'install' ##NO_TEXT.
     wa_zipfile_inst-version = 'LATEST'.
 
-    DATA(lv_zipfile_name_inst) = build_zipfile_name( i_operation = wa_zipfile_inst-op i_version = 'LATEST' ).
+    DATA(lv_zipfile_name_inst) = file_manager->build_zipfile_name( i_operation = wa_zipfile_inst-op i_version = 'LATEST' ).
 
-    wa_zipfile_inst-uri = |{ build_download_uri_prefix( ) }{ lv_zipfile_name_inst }|.
+    wa_zipfile_inst-uri = |{ file_manager->build_download_uri_prefix( ) }{ lv_zipfile_name_inst }|.
 
-    wa_zipfile_inst-json_web = |{ build_download_uri_prefix( ) }{ build_jsonfile_name( i_operation = wa_zipfile_inst-op i_version = 'LATEST' ) }|.
+    wa_zipfile_inst-json_web = |{ file_manager->build_download_uri_prefix( ) }{ file_manager->build_jsonfile_name( i_operation = wa_zipfile_inst-op i_version = 'LATEST' ) }|.
 
-    wa_zipfile_inst-path = build_zipfile_path( i_zipfile_name       = lv_zipfile_name_inst
-                                               i_trans_logical_path = c_trans_logical_path ).
+    wa_zipfile_inst-path = file_manager->build_zipfile_path( i_zipfile_name       = lv_zipfile_name_inst
+                                                             i_trans_logical_path = lif_sdk_file_manager=>c_trans_logical_path ).
 
-    validate_zipfile_path( i_zipfile_path   = wa_zipfile_inst-path
-                           i_logsubdir_name = c_logsubdir_name ).
+    file_manager->validate_zipfile_path( i_zipfile_path   = wa_zipfile_inst-path
+                                         i_logsubdir_name = lif_sdk_file_manager=>c_logsubdir_name ).
 
     APPEND wa_zipfile_inst TO mt_abapsdk_zipfiles.
 
@@ -1038,23 +1330,20 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
     wa_zipfile_uninst-op = 'uninstall' ##NO_TEXT.
     wa_zipfile_uninst-version = 'LATEST'.
 
-    DATA(lv_zipfile_name_uninst) = build_zipfile_name( i_operation = wa_zipfile_uninst-op i_version = 'LATEST' ).
+    DATA(lv_zipfile_name_uninst) = file_manager->build_zipfile_name( i_operation = wa_zipfile_uninst-op i_version = 'LATEST' ).
 
-    wa_zipfile_uninst-uri = |{ build_download_uri_prefix( ) }{ lv_zipfile_name_uninst }|.
+    wa_zipfile_uninst-uri = |{ file_manager->build_download_uri_prefix( ) }{ lv_zipfile_name_uninst }|.
 
-    wa_zipfile_uninst-json_web = |{ build_download_uri_prefix( ) }{ build_jsonfile_name( i_operation = wa_zipfile_uninst-op i_version = 'LATEST' ) }|.
+    wa_zipfile_uninst-json_web = |{ file_manager->build_download_uri_prefix( ) }{ file_manager->build_jsonfile_name( i_operation = wa_zipfile_uninst-op i_version = 'LATEST' ) }|.
 
-    wa_zipfile_uninst-path = build_zipfile_path( i_zipfile_name       = lv_zipfile_name_uninst
-                                                 i_trans_logical_path = c_trans_logical_path ).
+    wa_zipfile_uninst-path = file_manager->build_zipfile_path( i_zipfile_name       = lv_zipfile_name_uninst
+                                                               i_trans_logical_path = lif_sdk_file_manager=>c_trans_logical_path ).
 
-    validate_zipfile_path( i_zipfile_path   = wa_zipfile_uninst-path
-                           i_logsubdir_name = c_logsubdir_name ).
+    file_manager->validate_zipfile_path( i_zipfile_path   = wa_zipfile_uninst-path
+                                         i_logsubdir_name = lif_sdk_file_manager=>c_logsubdir_name ).
 
     APPEND wa_zipfile_uninst TO mt_abapsdk_zipfiles.
 
-
-    m_sdk_index_json_zip_path = 'META-INF/sdk_index.json' ##NO_TEXT.
-    m_transports_zip_path = 'transports/' ##NO_TEXT.
 
     certificate_manager->set_amazon_root_cert_values( ).
 
@@ -1331,7 +1620,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
   METHOD get_file_from_zip.
     DATA lv_zipfile_content TYPE xstring.
     TRY.
-        open_for_input( i_zipfile_absolute_path ).
+        file_manager->open_for_input( i_zipfile_absolute_path ).
         READ DATASET i_zipfile_absolute_path INTO lv_zipfile_content.
         CLOSE DATASET i_zipfile_absolute_path.
       CATCH cx_sy_file_authority INTO DATA(r_ex1).
@@ -1385,7 +1674,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
       WHEN 'zip'.
 
         l_jsonx = get_file_from_zip( i_zipfile_absolute_path = mt_abapsdk_zipfiles[ op = i_operation version = i_version ]-path
-                                     i_file_to_retrieve      = m_sdk_index_json_zip_path ).
+                                     i_file_to_retrieve      = lif_sdk_file_manager=>c_sdk_index_json_zip_path ).
 
       WHEN 'others'.
 
@@ -1523,7 +1812,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
 
     e_cofile_name = 'K' && i_transport+4 && '.' && i_transport+0(3).
 
-    l_cofile_zip_path = m_transports_zip_path && i_tla && '/' && e_cofile_name.
+    l_cofile_zip_path = lif_sdk_file_manager=>c_transports_zip_path && i_tla && '/' && e_cofile_name.
 
     e_cofile_blob = get_file_from_zip( i_zipfile_absolute_path = mt_abapsdk_zipfiles[ op = i_operation version = i_version ]-path
                                        i_file_to_retrieve      = l_cofile_zip_path ).
@@ -1540,7 +1829,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
 
     e_datafile_name = 'R' && i_transport+4 && '.' && i_transport+0(3).
 
-    l_datafile_zip_path = m_transports_zip_path && i_tla && '/' && e_datafile_name.
+    l_datafile_zip_path = lif_sdk_file_manager=>c_transports_zip_path && i_tla && '/' && e_datafile_name.
 
     e_datafile_blob = get_file_from_zip( i_zipfile_absolute_path = mt_abapsdk_zipfiles[ op = i_operation version = i_version ]-path
                                          i_file_to_retrieve      = l_datafile_zip_path ).
@@ -1548,115 +1837,6 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
 
   ENDMETHOD.
 
-  METHOD write_abapsdk_transport_trdir.
-
-    DATA lv_rc TYPE i.
-    DATA lv_validation_active TYPE abap_bool.
-    DATA lv_filepath_cofile TYPE string.
-    DATA lv_filepath_datafile TYPE string.
-    DATA gv_file_name(255) TYPE c.
-
-
-
-    CALL FUNCTION 'FILE_GET_NAME_USING_PATH'
-      EXPORTING
-        client                     = sy-mandt
-        logical_path               = c_trans_logical_path
-        operating_system           = sy-opsys
-        parameter_1                = 'cofiles'
-        file_name                  = i_cofile_name
-      IMPORTING
-        file_name_with_path        = lv_filepath_cofile
-      EXCEPTIONS
-        path_not_found             = 1
-        missing_parameter          = 2
-        operating_system_not_found = 3
-        file_system_not_found      = 4
-        OTHERS                     = 5.
-    IF sy-subrc <> 0.
-      raise_lpath_exception( lv_filepath_cofile ).
-    ENDIF.
-
-
-    CALL FUNCTION 'FILE_VALIDATE_NAME'
-      EXPORTING
-        logical_filename  = c_logsubdir_name
-        parameter_1       = 'cofiles'
-      CHANGING
-        physical_filename = lv_filepath_cofile
-      EXCEPTIONS
-        OTHERS            = 1.
-    IF sy-subrc <> 0.
-      MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
-        WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
-    ENDIF.
-
-
-
-    CALL FUNCTION 'FILE_GET_NAME_USING_PATH'
-      EXPORTING
-        client                     = sy-mandt
-        logical_path               = c_trans_logical_path
-        operating_system           = sy-opsys
-        parameter_1                = 'data'
-        file_name                  = i_datafile_name
-      IMPORTING
-        file_name_with_path        = lv_filepath_datafile
-      EXCEPTIONS
-        path_not_found             = 1
-        missing_parameter          = 2
-        operating_system_not_found = 3
-        file_system_not_found      = 4
-        OTHERS                     = 5.
-    IF sy-subrc <> 0.
-      raise_lpath_exception( i_datafile_name ).
-    ENDIF.
-
-    CALL FUNCTION 'FILE_VALIDATE_NAME'
-      EXPORTING
-        logical_filename  = c_logsubdir_name
-        parameter_1       = 'data'
-      CHANGING
-        physical_filename = lv_filepath_datafile
-      EXCEPTIONS
-        OTHERS            = 1.
-    IF sy-subrc <> 0.
-      MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
-        WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
-    ENDIF.
-
-
-    TRY.
-        open_for_output( lv_filepath_cofile ).
-        TRANSFER i_cofile_blob TO lv_filepath_cofile.
-        CLOSE DATASET lv_filepath_cofile.
-
-        open_for_output( lv_filepath_datafile ).
-        TRANSFER i_datafile_blob TO lv_filepath_datafile.
-        CLOSE DATASET lv_filepath_datafile.
-      CATCH cx_sy_file_authority INTO DATA(r_ex1).
-        MESSAGE r_ex1->get_text( ) TYPE 'I' DISPLAY LIKE 'E'.
-        RETURN.
-      CATCH cx_sy_file_access_error INTO DATA(r_ex2).
-        MESSAGE r_ex2->get_text( ) TYPE 'I' DISPLAY LIKE 'E'.
-        RETURN.
-      CATCH cx_root INTO DATA(r_ex).
-        MESSAGE r_ex->get_text( ) TYPE 'I' DISPLAY LIKE 'E'.
-        RETURN.
-    ENDTRY.
-
-    r_success = abap_true.
-
-  ENDMETHOD.
-
-  METHOD raise_lpath_exception.
-    RAISE EXCEPTION TYPE lcx_error
-      EXPORTING
-        iv_msg = |Could not determine location to save { iv_filename }. | &&
-                 |Please maintain logical path { c_trans_logical_path } in transaction FILE | &&
-                 |to point to physical path <P=DIR_TRANS>/<PARAM_1>/<FILENAME>| ##NO_TEXT.
-
-  ENDMETHOD.
 
   METHOD import_abapsdk_transports.
 
@@ -1799,49 +1979,13 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
   ENDMETHOD.
 
 
-
-
-  METHOD check_file_writable_at.
-    TRY.
-        open_for_output( i_path ).
-        CLOSE DATASET i_path.
-        r_result = abap_true.
-      CATCH lcx_error INTO DATA(lo_ex).
-        MESSAGE |Path { i_path } not writable, reason: { lo_ex->av_msg }| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-    ENDTRY.
-  ENDMETHOD.
-
-
-  METHOD check_file_exists_at.
-
-    DATA(lv_path) = CONV pfebackuppro( i_path ).
-    CALL FUNCTION 'PFL_CHECK_OS_FILE_EXISTENCE'
-      EXPORTING
-        long_filename         = lv_path
-      IMPORTING
-        file_exists           = r_result
-      EXCEPTIONS
-        authorization_missing = 1
-        OTHERS                = 2.
-
-    CASE sy-subrc.
-      WHEN 0.
-        " all good
-      WHEN 1.
-        RAISE EXCEPTION TYPE cx_sy_file_authority.
-      WHEN 2.
-        RAISE EXCEPTION TYPE cx_sy_file_io. " TODO: Find/Create more appropriate exception for generic case
-    ENDCASE.
-
-  ENDMETHOD.
-
   METHOD update_abapsdk_zipfile_paths.
 
     DATA(lv_exists) = abap_false.
 
     LOOP AT mt_abapsdk_zipfiles INTO DATA(wa_abapsdk_zipfile).
 
-      lv_exists = check_file_exists_at( i_path = wa_abapsdk_zipfile-path ).
+      lv_exists = file_manager->check_file_exists_at( i_path = wa_abapsdk_zipfile-path ).
 
       IF lv_exists = abap_true.
         CONTINUE.
@@ -1857,7 +2001,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
   METHOD check_abapsdk_zipfile_exists.
 
     IF line_exists( mt_abapsdk_zipfiles[ op = i_operation version = i_version ] ).
-      r_result = check_file_exists_at( mt_abapsdk_zipfiles[ op = i_operation version = i_version ]-path ).
+      r_result = file_manager->check_file_exists_at( mt_abapsdk_zipfiles[ op = i_operation version = i_version ]-path ).
     ELSE.
       r_result = abap_false.
     ENDIF.
@@ -1882,22 +2026,22 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
       wa_zipfile_inst-op = 'install' ##NO_TEXT.
       wa_zipfile_inst-version = lv_version.
 
-      DATA(lv_zipfile_name_inst) = build_zipfile_name( i_operation = wa_zipfile_inst-op i_version = lv_version ).
+      DATA(lv_zipfile_name_inst) = file_manager->build_zipfile_name( i_operation = wa_zipfile_inst-op i_version = lv_version ).
 
-      wa_zipfile_inst-uri = |{ build_download_uri_prefix( ) }{ lv_zipfile_name_inst }|.
+      wa_zipfile_inst-uri = |{ file_manager->build_download_uri_prefix( ) }{ lv_zipfile_name_inst }|.
 
-      wa_zipfile_inst-json_web = |{ build_download_uri_prefix( ) }{ build_jsonfile_name( i_operation = wa_zipfile_inst-op i_version = lv_version ) }|.
+      wa_zipfile_inst-json_web = |{ file_manager->build_download_uri_prefix( ) }{ file_manager->build_jsonfile_name( i_operation = wa_zipfile_inst-op i_version = lv_version ) }|.
 
-      wa_zipfile_inst-path = build_zipfile_path( i_zipfile_name       = lv_zipfile_name_inst
-                                                 i_trans_logical_path = c_trans_logical_path ).
+      wa_zipfile_inst-path = file_manager->build_zipfile_path( i_zipfile_name       = lv_zipfile_name_inst
+                                                               i_trans_logical_path = lif_sdk_file_manager=>c_trans_logical_path ).
 
-      validate_zipfile_path( i_zipfile_path   = wa_zipfile_inst-path
-                             i_logsubdir_name = c_logsubdir_name ).
+      file_manager->validate_zipfile_path( i_zipfile_path   = wa_zipfile_inst-path
+                                           i_logsubdir_name = lif_sdk_file_manager=>c_logsubdir_name ).
 
       APPEND wa_zipfile_inst TO mt_abapsdk_zipfiles.  " save for maybe later
       APPEND wa_zipfile_inst TO lt_abapsdk_zipfiles.  " save for now
 
-      IF check_file_exists_at( lt_abapsdk_zipfiles[ op = 'install' version = lv_version ]-path ) = abap_false.
+      IF file_manager->check_file_exists_at( lt_abapsdk_zipfiles[ op = 'install' version = lv_version ]-path ) = abap_false.
         MESSAGE |ABAP SDK zipfile for installation in version { lv_version } not present on system. Downloading them now.| TYPE 'I' ##NO_TEXT.
         lv_dl_result = download_abapsdk_zipfiles( i_file_list = mt_abapsdk_zipfiles
                                                   i_version   = lv_version ).
@@ -1914,23 +2058,23 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
         wa_zipfile_uninst-op = 'uninstall' ##NO_TEXT.
         wa_zipfile_uninst-version = lv_version.
 
-        DATA(lv_zipfile_name_uninst) = build_zipfile_name( i_operation = wa_zipfile_uninst-op
-                                                           i_version   = lv_version ).
+        DATA(lv_zipfile_name_uninst) = file_manager->build_zipfile_name( i_operation = wa_zipfile_uninst-op
+                                                                         i_version   = lv_version ).
 
-        wa_zipfile_uninst-uri = |{ build_download_uri_prefix( ) }{ lv_zipfile_name_uninst }|.
+        wa_zipfile_uninst-uri = |{ file_manager->build_download_uri_prefix( ) }{ lv_zipfile_name_uninst }|.
 
-        wa_zipfile_uninst-json_web = |{ build_download_uri_prefix( ) }{ build_jsonfile_name( i_operation = wa_zipfile_uninst-op i_version = lv_version ) }|.
+        wa_zipfile_uninst-json_web = |{ file_manager->build_download_uri_prefix( ) }{ file_manager->build_jsonfile_name( i_operation = wa_zipfile_uninst-op i_version = lv_version ) }|.
 
-        wa_zipfile_uninst-path = build_zipfile_path( i_zipfile_name       = lv_zipfile_name_uninst
-                                                     i_trans_logical_path = c_trans_logical_path ).
+        wa_zipfile_uninst-path = file_manager->build_zipfile_path( i_zipfile_name       = lv_zipfile_name_uninst
+                                                                   i_trans_logical_path = lif_sdk_file_manager=>c_trans_logical_path ).
 
-        validate_zipfile_path( i_zipfile_path   = wa_zipfile_uninst-path
-                               i_logsubdir_name = c_logsubdir_name ).
+        file_manager->validate_zipfile_path( i_zipfile_path   = wa_zipfile_uninst-path
+                                             i_logsubdir_name = lif_sdk_file_manager=>c_logsubdir_name ).
 
         APPEND wa_zipfile_uninst TO mt_abapsdk_zipfiles.
         APPEND wa_zipfile_uninst TO lt_abapsdk_zipfiles.
 
-        IF check_file_exists_at( lt_abapsdk_zipfiles[ op = 'uninstall' version = lv_version ]-path ) = abap_false.
+        IF file_manager->check_file_exists_at( lt_abapsdk_zipfiles[ op = 'uninstall' version = lv_version ]-path ) = abap_false.
           MESSAGE |ABAP SDK zipfiles for uninstallation in version { lv_version } not present on system. Downloading them now.| TYPE 'I' ##NO_TEXT.
           lv_dl_result = download_abapsdk_zipfiles( i_file_list = mt_abapsdk_zipfiles
                                                     i_version   = lv_version ).
@@ -2026,7 +2170,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
           e_datafile_blob = DATA(l_datafile_blob) ).
 
 
-      DATA(l_success_write) = write_abapsdk_transport_trdir(
+      DATA(l_success_write) = tms_manager->write_transport_trdir(
         i_cofile_name   = l_cofile_name
         i_datafile_name = l_datafile_name
         i_cofile_blob   = l_cofile_blob
@@ -2085,7 +2229,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
           e_datafile_blob = DATA(l_uninstall_datafile_blob) ).
 
 
-      write_abapsdk_transport_trdir(
+      tms_manager->write_transport_trdir(
         EXPORTING
           i_cofile_name   = l_uninstall_cofile_name
           i_datafile_name = l_uninstall_datafile_name
@@ -2194,17 +2338,17 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
       wa_zipfile_inst-op = 'install' ##NO_TEXT.
       wa_zipfile_inst-version = s_target_version.
 
-      DATA(lv_zipfile_name_inst) = build_zipfile_name( i_operation = wa_zipfile_inst-op i_version = s_target_version ).
+      DATA(lv_zipfile_name_inst) = file_manager->build_zipfile_name( i_operation = wa_zipfile_inst-op i_version = s_target_version ).
 
-      wa_zipfile_inst-uri = |{ build_download_uri_prefix( ) }{ lv_zipfile_name_inst }|.
+      wa_zipfile_inst-uri = |{ file_manager->build_download_uri_prefix( ) }{ lv_zipfile_name_inst }|.
 
-      wa_zipfile_inst-json_web = |{ build_download_uri_prefix( ) }{ build_jsonfile_name( i_operation = wa_zipfile_inst-op i_version = s_target_version ) }|.
+      wa_zipfile_inst-json_web = |{ file_manager->build_download_uri_prefix( ) }{ file_manager->build_jsonfile_name( i_operation = wa_zipfile_inst-op i_version = s_target_version ) }|.
 
-      wa_zipfile_inst-path = build_zipfile_path( i_zipfile_name       = lv_zipfile_name_inst
-                                                 i_trans_logical_path = c_trans_logical_path ).
+      wa_zipfile_inst-path = file_manager->build_zipfile_path( i_zipfile_name       = lv_zipfile_name_inst
+                                                               i_trans_logical_path = lif_sdk_file_manager=>c_trans_logical_path ).
 
-      validate_zipfile_path( i_zipfile_path   = wa_zipfile_inst-path
-                             i_logsubdir_name = c_logsubdir_name ).
+      file_manager->validate_zipfile_path( i_zipfile_path   = wa_zipfile_inst-path
+                                           i_logsubdir_name = lif_sdk_file_manager=>c_logsubdir_name ).
 
       APPEND wa_zipfile_inst TO mt_abapsdk_zipfiles.  " save for later
       APPEND wa_zipfile_inst TO lt_abapsdk_zipfiles.  " save for now
@@ -2214,7 +2358,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
       APPEND wa_zipfile_inst TO lt_abapsdk_zipfiles.  " save for now
     ENDIF.
 
-    IF check_file_exists_at( lt_abapsdk_zipfiles[ op = 'install' version = s_target_version ]-path ) = abap_false.
+    IF file_manager->check_file_exists_at( lt_abapsdk_zipfiles[ op = 'install' version = s_target_version ]-path ) = abap_false.
       download_abapsdk_zipfiles( i_file_list = lt_abapsdk_zipfiles
                                  i_version   = s_target_version ).
     ENDIF.
@@ -2226,18 +2370,18 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
       wa_zipfile_uninst-op = 'uninstall' ##NO_TEXT.
       wa_zipfile_uninst-version = s_target_version.
 
-      DATA(lv_zipfile_name_uninst) = build_zipfile_name( i_operation = wa_zipfile_uninst-op
-                                                         i_version   = s_target_version ).
+      DATA(lv_zipfile_name_uninst) = file_manager->build_zipfile_name( i_operation = wa_zipfile_uninst-op
+                                                                       i_version   = s_target_version ).
 
-      wa_zipfile_uninst-uri = |{ build_download_uri_prefix( ) }{ lv_zipfile_name_uninst }|.
+      wa_zipfile_uninst-uri = |{ file_manager->build_download_uri_prefix( ) }{ lv_zipfile_name_uninst }|.
 
-      wa_zipfile_uninst-json_web = |{ build_download_uri_prefix( ) }{ build_jsonfile_name( i_operation = wa_zipfile_uninst-op i_version = s_target_version ) }|.
+      wa_zipfile_uninst-json_web = |{ file_manager->build_download_uri_prefix( ) }{ file_manager->build_jsonfile_name( i_operation = wa_zipfile_uninst-op i_version = s_target_version ) }|.
 
-      wa_zipfile_uninst-path = build_zipfile_path( i_zipfile_name       = lv_zipfile_name_uninst
-                                                   i_trans_logical_path = c_trans_logical_path ).
+      wa_zipfile_uninst-path = file_manager->build_zipfile_path( i_zipfile_name       = lv_zipfile_name_uninst
+                                                                 i_trans_logical_path = lif_sdk_file_manager=>c_trans_logical_path ).
 
-      validate_zipfile_path( i_zipfile_path   = wa_zipfile_uninst-path
-                             i_logsubdir_name = c_logsubdir_name ).
+      file_manager->validate_zipfile_path( i_zipfile_path   = wa_zipfile_uninst-path
+                                           i_logsubdir_name = lif_sdk_file_manager=>c_logsubdir_name ).
 
       APPEND wa_zipfile_uninst TO mt_abapsdk_zipfiles.
       APPEND wa_zipfile_uninst TO lt_abapsdk_zipfiles.
@@ -2247,7 +2391,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
       APPEND wa_zipfile_uninst TO lt_abapsdk_zipfiles.  " save for now
     ENDIF.
 
-    IF check_file_exists_at( lt_abapsdk_zipfiles[ op = 'uninstall' version = s_target_version ]-path ) = abap_false.
+    IF file_manager->check_file_exists_at( lt_abapsdk_zipfiles[ op = 'uninstall' version = s_target_version ]-path ) = abap_false.
       download_abapsdk_zipfiles( i_file_list = lt_abapsdk_zipfiles
                                  i_version   = s_target_version ).
     ENDIF.
@@ -2302,7 +2446,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
       WRITE / |Downloaded data file | && lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport &&
                | for TLA | && lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla ##NO_TEXT.
 
-      write_abapsdk_transport_trdir(
+      tms_manager->write_transport_trdir(
         EXPORTING
           i_cofile_name   = l_cofile_name
           i_datafile_name = l_datafile_name
@@ -2362,7 +2506,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
           e_datafile_blob = DATA(l_uninstall_datafile_blob) ).
 
 
-      write_abapsdk_transport_trdir(
+      tms_manager->write_transport_trdir(
         EXPORTING
           i_cofile_name   = l_uninstall_cofile_name
           i_datafile_name = l_uninstall_datafile_name
@@ -2403,24 +2547,24 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
 
     LOOP AT lt_abapsdk_zipfiles ASSIGNING FIELD-SYMBOL(<fs_abapsdk_zipfile>).
 
-      DATA(lv_zipfile_name) = build_zipfile_name( i_operation = <fs_abapsdk_zipfile>-op
-                                                  i_version   = <fs_abapsdk_zipfile>-version ).
+      DATA(lv_zipfile_name) = file_manager->build_zipfile_name( i_operation = <fs_abapsdk_zipfile>-op
+                                                                i_version   = <fs_abapsdk_zipfile>-version ).
 
-      DATA(lv_jsonfile_name) = build_jsonfile_name( i_operation = <fs_abapsdk_zipfile>-op
-                                                    i_version   = <fs_abapsdk_zipfile>-version ).
+      DATA(lv_jsonfile_name) = file_manager->build_jsonfile_name( i_operation = <fs_abapsdk_zipfile>-op
+                                                                  i_version   = <fs_abapsdk_zipfile>-version ).
 
-      <fs_abapsdk_zipfile>-uri = |{ build_download_uri_prefix(  ) }{ lv_zipfile_name }|.
+      <fs_abapsdk_zipfile>-uri = |{ file_manager->build_download_uri_prefix(  ) }{ lv_zipfile_name }|.
 
-      <fs_abapsdk_zipfile>-json_web = |{ build_download_uri_prefix(  ) }{ lv_jsonfile_name }|.
+      <fs_abapsdk_zipfile>-json_web = |{ file_manager->build_download_uri_prefix(  ) }{ lv_jsonfile_name }|.
 
-      <fs_abapsdk_zipfile>-path = build_zipfile_path( i_zipfile_name       = lv_zipfile_name
-                                                      i_trans_logical_path = c_trans_logical_path ).
+      <fs_abapsdk_zipfile>-path = file_manager->build_zipfile_path( i_zipfile_name       = lv_zipfile_name
+                                                                    i_trans_logical_path = lif_sdk_file_manager=>c_trans_logical_path ).
 
-      validate_zipfile_path( i_zipfile_path   = <fs_abapsdk_zipfile>-path
-                             i_logsubdir_name = c_logsubdir_name ).
+      file_manager->validate_zipfile_path( i_zipfile_path   = <fs_abapsdk_zipfile>-path
+                                           i_logsubdir_name = lif_sdk_file_manager=>c_logsubdir_name ).
 
 
-      IF check_file_writable_at( i_path = <fs_abapsdk_zipfile>-path ) = abap_false.
+      IF file_manager->check_file_writable_at( i_path = <fs_abapsdk_zipfile>-path ) = abap_false.
         MESSAGE |File at path { <fs_abapsdk_zipfile>-path } not writable!| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
         lv_result = abap_false.
         EXIT.
@@ -2437,7 +2581,7 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
 
 
       TRY.
-          open_for_output( <fs_abapsdk_zipfile>-path ).
+          file_manager->open_for_output( <fs_abapsdk_zipfile>-path ).
           TRANSFER e_zipfile_blob TO <fs_abapsdk_zipfile>-path.
           CLOSE DATASET <fs_abapsdk_zipfile>-path.
         CATCH cx_sy_file_authority INTO DATA(r_ex1).
@@ -2485,82 +2629,11 @@ CLASS lcl_abapsdk_package_manager IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD get_parameter.
-    DATA lv_value TYPE pfepvalue.
-    DATA lv_rc TYPE i.
-
-
-    CALL FUNCTION 'TH_GET_PARAMETER'
-      EXPORTING
-        parameter_name  = CONV pfeparname( iv_param )
-      IMPORTING
-        parameter_value = lv_value
-        rc              = lv_rc
-      EXCEPTIONS
-        not_authorized  = 1
-        OTHERS          = 2.
-
-    IF lv_rc <> 0 OR sy-subrc <> 0.
-      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not determine parameter { iv_param }| ##NO_TEXT.
-    ENDIF.
-    rv_value = lv_value.
-  ENDMETHOD.
-
-
-  METHOD open_for_input.
-    DATA lv_os_msg TYPE text255.
-    OPEN DATASET iv_filename FOR INPUT IN BINARY MODE MESSAGE lv_os_msg.
-    IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE lcx_error
-        EXPORTING
-          iv_msg = |Error opening { iv_filename }: { lv_os_msg }| ##NO_TEXT.
-    ENDIF.
-  ENDMETHOD.
-
-
-  METHOD open_for_output.
-    DATA(lv_filename_to_check) = CONV fileextern( iv_filename ).
-    AUTHORITY-CHECK OBJECT 'S_DATASET'
-      ID 'PROGRAM' FIELD sy-repid
-      ID 'ACTVT' FIELD '34'
-      ID 'FILENAME' FIELD lv_filename_to_check ##AUTH_FLD_LEN.
-    IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE lcx_error
-        EXPORTING
-          iv_msg = |No permission to write to { iv_filename }| ##NO_TEXT.
-    ENDIF.
-
-    DATA lv_os_msg TYPE text255.
-    OPEN DATASET iv_filename FOR OUTPUT IN BINARY MODE MESSAGE lv_os_msg.
-    IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE lcx_error
-        EXPORTING
-          iv_msg = |Error opening { iv_filename }: { lv_os_msg }| ##NO_TEXT.
-    ENDIF.
-  ENDMETHOD.
-
-
-
-  METHOD binary_to_xstring.
-    CALL FUNCTION 'SCMS_BINARY_TO_XSTRING'
-      EXPORTING
-        input_length = iv_length
-      IMPORTING
-        buffer       = ov_xstring
-      TABLES
-        binary_tab   = it_bintab
-      EXCEPTIONS
-        failed       = 1
-        OTHERS       = 2.
-    IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not convert bin table to xstring| ##NO_TEXT.
-    ENDIF.
-  ENDMETHOD.
 ENDCLASS.
 
 
 
-CLASS lcl_abapsdk_pm_tree_controller DEFINITION FINAL FRIENDS lcl_abapsdk_package_manager.
+CLASS lcl_ui_tree_controller DEFINITION FINAL FRIENDS lcl_sdk_package_manager.
   PUBLIC SECTION.
 
     CONSTANTS: c_operation_none              TYPE i VALUE 0,
@@ -2582,7 +2655,7 @@ CLASS lcl_abapsdk_pm_tree_controller DEFINITION FINAL FRIENDS lcl_abapsdk_packag
 
 
     DATA:
-      mr_abapsdk_package_manager   TYPE REF TO lcl_abapsdk_package_manager,
+      mr_sdk_package_manager       TYPE REF TO lcl_sdk_package_manager,
       mr_container                 TYPE REF TO cl_gui_container,
       mr_tree                      TYPE REF TO cl_salv_tree,
       mt_treetab                   TYPE tt_abapsdk_module,
@@ -2604,8 +2677,8 @@ CLASS lcl_abapsdk_pm_tree_controller DEFINITION FINAL FRIENDS lcl_abapsdk_packag
       fill_container_content FOR if_salv_csqt_content_manager~fill_container_content.
 
     METHODS:
-      constructor IMPORTING ir_abapsdk_package_manager TYPE REF TO lcl_abapsdk_package_manager
-                            i_certificate_manager      TYPE REF TO lif_certificate_manager OPTIONAL
+      constructor IMPORTING ir_sdk_package_manager    TYPE REF TO lcl_sdk_package_manager
+                            i_sdk_certificate_manager TYPE REF TO lif_sdk_certificate_manager OPTIONAL
                   RAISING   lcx_error,
       get_modules_to_be_installed IMPORTING i_target_version                  TYPE string
                                   RETURNING VALUE(rt_modules_to_be_installed) TYPE tt_abapsdk_tla,
@@ -2681,36 +2754,36 @@ CLASS lcl_abapsdk_pm_tree_controller DEFINITION FINAL FRIENDS lcl_abapsdk_packag
 
   PROTECTED SECTION.
   PRIVATE SECTION.
-    DATA: certificate_manager TYPE REF TO lif_certificate_manager.
+    DATA: certificate_manager TYPE REF TO lif_sdk_certificate_manager.
 
 ENDCLASS.
 
 
 
-CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
+CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
   METHOD constructor.
 
-    IF ir_abapsdk_package_manager IS BOUND.
-      mr_abapsdk_package_manager = ir_abapsdk_package_manager.
+    IF ir_sdk_package_manager IS BOUND.
+      mr_sdk_package_manager = ir_sdk_package_manager.
     ELSE.
-      mr_abapsdk_package_manager = NEW lcl_abapsdk_package_manager( ).
+      mr_sdk_package_manager = NEW lcl_sdk_package_manager( ).
     ENDIF.
 
-    IF i_certificate_manager IS BOUND.
-      certificate_manager = i_certificate_manager.
+    IF i_sdk_certificate_manager IS BOUND.
+      certificate_manager = i_sdk_certificate_manager.
     ELSE.
-      certificate_manager = NEW lcl_certificate_manager( ).
+      certificate_manager = NEW lcl_sdk_certificate_manager( ).
     ENDIF.
 
-    mt_installed_modules = mr_abapsdk_package_manager->get_abapsdk_installed_modules( ).
+    mt_installed_modules = mr_sdk_package_manager->get_abapsdk_installed_modules( ).
 
-    mt_available_modules_inst = mr_abapsdk_package_manager->get_abapsdk_avail_modules_json( i_operation = 'install'
-                                                                                            i_source    = 'web'
-                                                                                            i_version   = 'LATEST' ).
-    mt_available_modules_uninst = mr_abapsdk_package_manager->get_abapsdk_avail_modules_json( i_operation = 'uninstall'
-                                                                                              i_source    = 'web'
-                                                                                              i_version   = 'LATEST' ).
+    mt_available_modules_inst = mr_sdk_package_manager->get_abapsdk_avail_modules_json( i_operation = 'install'
+                                                                                        i_source    = 'web'
+                                                                                        i_version   = 'LATEST' ).
+    mt_available_modules_uninst = mr_sdk_package_manager->get_abapsdk_avail_modules_json( i_operation = 'uninstall'
+                                                                                          i_source    = 'web'
+                                                                                          i_version   = 'LATEST' ).
 
     SELECT tla FROM @mt_available_modules_inst AS am WHERE is_popular = 'X' INTO TABLE @mt_popular_modules .
 
@@ -3060,7 +3133,7 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
     ENDIF.
 
 
-    IF mr_abapsdk_package_manager->is_job_running( ).
+    IF mr_sdk_package_manager->is_job_running( ).
       lr_item->set_editable( abap_false ).
     ENDIF.
 
@@ -3205,7 +3278,7 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 
 
 
-        IF mr_abapsdk_package_manager->is_job_running( ).
+        IF mr_sdk_package_manager->is_job_running( ).
           lr_item->set_editable( abap_false ).
         ELSE.
           lr_item->set_editable( abap_true ).
@@ -3237,7 +3310,7 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
     IF l_inst_mod_no >= 4.
       l_inst_mod_no = l_inst_mod_no - 3.
     ENDIF.
-    DATA(l_inst_deprecated_mod_ins_no) = lines( mr_abapsdk_package_manager->get_abapsdk_deprecated_mod_ins( ) ).
+    DATA(l_inst_deprecated_mod_ins_no) = lines( mr_sdk_package_manager->get_abapsdk_deprecated_mod_ins( ) ).
     DATA(l_avail_modules_no) = lines( mt_available_modules_inst ) - ( l_inst_mod_no - l_inst_deprecated_mod_ins_no ).
 
     IF lines( mt_installed_modules ) = 0.
@@ -3406,7 +3479,7 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
       ENDIF.
 
 
-      IF mr_abapsdk_package_manager->is_job_running( ).
+      IF mr_sdk_package_manager->is_job_running( ).
         lr_item->set_editable( abap_false ).
       ENDIF.
 
@@ -3430,11 +3503,11 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 
 
     " Job already running?
-    IF mr_abapsdk_package_manager->is_job_running( ).
+    IF mr_sdk_package_manager->is_job_running( ).
 
       " get job number
       DATA: lt_joblist TYPE tbtcjob_tt.
-      lt_joblist = mr_abapsdk_package_manager->get_running_jobs( i_jobname = sy-repid ).
+      lt_joblist = mr_sdk_package_manager->get_running_jobs( i_jobname = sy-repid ).
       DATA wa_job TYPE tbtcjob.
       READ TABLE lt_joblist INTO wa_job INDEX 1.
       IF sy-subrc <> 0.
@@ -3486,18 +3559,18 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 
   METHOD refresh.
 
-    mt_installed_modules = mr_abapsdk_package_manager->get_abapsdk_installed_modules( ).
+    mt_installed_modules = mr_sdk_package_manager->get_abapsdk_installed_modules( ).
 
-    mt_available_modules_inst = mr_abapsdk_package_manager->get_abapsdk_avail_modules_json( i_operation = 'install'
-                                                                                            i_source    = 'web'
-                                                                                            i_version   = 'LATEST' ).
+    mt_available_modules_inst = mr_sdk_package_manager->get_abapsdk_avail_modules_json( i_operation = 'install'
+                                                                                        i_source    = 'web'
+                                                                                        i_version   = 'LATEST' ).
 
-    mt_available_modules_uninst = mr_abapsdk_package_manager->get_abapsdk_avail_modules_json( i_operation = 'uninstall'
-                                                                                              i_source    = 'web'
-                                                                                              i_version   = 'LATEST' ).
+    mt_available_modules_uninst = mr_sdk_package_manager->get_abapsdk_avail_modules_json( i_operation = 'uninstall'
+                                                                                          i_source    = 'web'
+                                                                                          i_version   = 'LATEST' ).
 
 
-    IF NOT mr_abapsdk_package_manager->is_job_running( ).
+    IF NOT mr_sdk_package_manager->is_job_running( ).
       CLEAR: mt_modules_to_be_installed.
       CLEAR: mt_modules_to_be_deleted.
     ENDIF.
@@ -3509,7 +3582,7 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 
     MESSAGE |Refresh complete.| TYPE 'S' ##NO_TEXT.
 
-    IF mr_abapsdk_package_manager->is_job_running( ).
+    IF mr_sdk_package_manager->is_job_running( ).
       display_job_details_statusbar( ).
     ENDIF.
 
@@ -3535,7 +3608,7 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
         lr_functions = mr_tree->get_functions( ).
 
         " If a job is running we deactivate all buttons that could interfere with the running op
-        IF mr_abapsdk_package_manager->is_job_running( ) = abap_true.
+        IF mr_sdk_package_manager->is_job_running( ) = abap_true.
           lr_functions->enable_function( name    = 'EXE_FGND'
                                          boolean = ' ' ).
           lr_functions->enable_function( name    = 'EXE_BGND'
@@ -3648,11 +3721,11 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
   METHOD display_job_details_statusbar.
 
     " Job already running?
-    IF mr_abapsdk_package_manager->is_job_running( ).
+    IF mr_sdk_package_manager->is_job_running( ).
 
       " get job number
       DATA: lt_joblist TYPE tbtcjob_tt.
-      lt_joblist = mr_abapsdk_package_manager->get_running_jobs( i_jobname = sy-repid ).
+      lt_joblist = mr_sdk_package_manager->get_running_jobs( i_jobname = sy-repid ).
       DATA wa_job TYPE tbtcjob.
       READ TABLE lt_joblist INTO wa_job INDEX 1.
       IF sy-subrc <> 0.
@@ -3671,11 +3744,11 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
   METHOD display_job_details.
 
     " Job already running?
-    IF mr_abapsdk_package_manager->is_job_running( ).
+    IF mr_sdk_package_manager->is_job_running( ).
 
       " get job number
       DATA: lt_joblist TYPE tbtcjob_tt.
-      lt_joblist = mr_abapsdk_package_manager->get_running_jobs( i_jobname = sy-repid ).
+      lt_joblist = mr_sdk_package_manager->get_running_jobs( i_jobname = sy-repid ).
       DATA wa_job TYPE tbtcjob.
       READ TABLE lt_joblist INTO wa_job INDEX 1.
       IF sy-subrc <> 0.
@@ -3868,9 +3941,9 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
   METHOD is_version_latest.
 
     TRY.
-        DATA(lt_latest_inst_modules) = mr_abapsdk_package_manager->get_abapsdk_avail_modules_json( i_operation = 'install'
-                                                                                                   i_source    = 'web'
-                                                                                                   i_version   = 'LATEST' ).
+        DATA(lt_latest_inst_modules) = mr_sdk_package_manager->get_abapsdk_avail_modules_json( i_operation = 'install'
+                                                                                               i_source    = 'web'
+                                                                                               i_version   = 'LATEST' ).
       CATCH lcx_error.
     ENDTRY.
 
@@ -4085,8 +4158,8 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
     lv_result = abap_true.
     lv_version = i_version.
 
-    IF mr_abapsdk_package_manager->check_abapsdk_zipfile_exists( i_operation = 'install' i_version = lv_version ) = abap_false
-        OR mr_abapsdk_package_manager->check_abapsdk_zipfile_exists( i_operation = 'uninstall' i_version = lv_version ) = abap_false.
+    IF mr_sdk_package_manager->check_abapsdk_zipfile_exists( i_operation = 'install' i_version = lv_version ) = abap_false
+        OR mr_sdk_package_manager->check_abapsdk_zipfile_exists( i_operation = 'uninstall' i_version = lv_version ) = abap_false.
 
 
       "--- install
@@ -4094,25 +4167,25 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
       wa_zipfile_inst-op = 'install' ##NO_TEXT.
       wa_zipfile_inst-version = lv_version.
 
-      DATA(lv_zipfile_name_inst) = mr_abapsdk_package_manager->build_zipfile_name( i_operation = wa_zipfile_inst-op i_version = lv_version ).
+      DATA(lv_zipfile_name_inst) = mr_sdk_package_manager->file_manager->build_zipfile_name( i_operation = wa_zipfile_inst-op i_version = lv_version ).
 
-      wa_zipfile_inst-uri = |{ mr_abapsdk_package_manager->build_download_uri_prefix( ) }{ lv_zipfile_name_inst }|.
+      wa_zipfile_inst-uri = |{ mr_sdk_package_manager->file_manager->build_download_uri_prefix( ) }{ lv_zipfile_name_inst }|.
 
-      wa_zipfile_inst-json_web = |{ mr_abapsdk_package_manager->build_download_uri_prefix( ) }{ mr_abapsdk_package_manager->build_jsonfile_name( i_operation = wa_zipfile_inst-op i_version = lv_version ) }|.
+      wa_zipfile_inst-json_web = |{ mr_sdk_package_manager->file_manager->build_download_uri_prefix( ) }{ mr_sdk_package_manager->file_manager->build_jsonfile_name( i_operation = wa_zipfile_inst-op i_version = lv_version ) }|.
 
-      wa_zipfile_inst-path = mr_abapsdk_package_manager->build_zipfile_path( i_zipfile_name       = lv_zipfile_name_inst
-                                                                             i_trans_logical_path = mr_abapsdk_package_manager->c_trans_logical_path ).
+      wa_zipfile_inst-path = mr_sdk_package_manager->file_manager->build_zipfile_path( i_zipfile_name       = lv_zipfile_name_inst
+                                                                                       i_trans_logical_path = lif_sdk_file_manager=>c_trans_logical_path ).
 
-      mr_abapsdk_package_manager->validate_zipfile_path( i_zipfile_path   = wa_zipfile_inst-path
-                                                         i_logsubdir_name = mr_abapsdk_package_manager->c_logsubdir_name ).
+      mr_sdk_package_manager->file_manager->validate_zipfile_path( i_zipfile_path   = wa_zipfile_inst-path
+                                                                   i_logsubdir_name = lif_sdk_file_manager=>c_logsubdir_name ).
 
-      APPEND wa_zipfile_inst TO mr_abapsdk_package_manager->mt_abapsdk_zipfiles.  " save for maybe later
+      APPEND wa_zipfile_inst TO mr_sdk_package_manager->mt_abapsdk_zipfiles.  " save for maybe later
       APPEND wa_zipfile_inst TO lt_abapsdk_zipfiles.  " save for now
 
-      IF mr_abapsdk_package_manager->check_file_exists_at( lt_abapsdk_zipfiles[ op = 'install' version = lv_version ]-path ) = abap_false.
+      IF mr_sdk_package_manager->file_manager->check_file_exists_at( lt_abapsdk_zipfiles[ op = 'install' version = lv_version ]-path ) = abap_false.
         MESSAGE |ABAP SDK zipfile for installation in version { lv_version } not present on system. Downloading them now.| TYPE 'I' ##NO_TEXT.
-        lv_dl_result = mr_abapsdk_package_manager->download_abapsdk_zipfiles( i_file_list = mr_abapsdk_package_manager->mt_abapsdk_zipfiles
-                                                                              i_version   = lv_version ).
+        lv_dl_result = mr_sdk_package_manager->download_abapsdk_zipfiles( i_file_list = mr_sdk_package_manager->mt_abapsdk_zipfiles
+                                                                          i_version   = lv_version ).
       ELSE.
         lv_dl_result = abap_true.
       ENDIF.
@@ -4120,32 +4193,32 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 
 
       "--- uninstall
-      IF mr_abapsdk_package_manager->check_abapsdk_zipfile_exists( i_operation = 'uninstall'
+      IF mr_sdk_package_manager->check_abapsdk_zipfile_exists( i_operation = 'uninstall'
                                   i_version = lv_version ) = abap_false.
         DATA wa_zipfile_uninst TYPE ts_abapsdk_zip.
         wa_zipfile_uninst-op = 'uninstall' ##NO_TEXT.
         wa_zipfile_uninst-version = lv_version.
 
-        DATA(lv_zipfile_name_uninst) = mr_abapsdk_package_manager->build_zipfile_name( i_operation = wa_zipfile_uninst-op
-                                                                                       i_version   = lv_version ).
+        DATA(lv_zipfile_name_uninst) = mr_sdk_package_manager->file_manager->build_zipfile_name( i_operation = wa_zipfile_uninst-op
+                                                                                                 i_version   = lv_version ).
 
-        wa_zipfile_uninst-uri = |{ mr_abapsdk_package_manager->build_download_uri_prefix( ) }{ lv_zipfile_name_uninst }|.
+        wa_zipfile_uninst-uri = |{ mr_sdk_package_manager->file_manager->build_download_uri_prefix( ) }{ lv_zipfile_name_uninst }|.
 
-        wa_zipfile_uninst-json_web = |{ mr_abapsdk_package_manager->build_download_uri_prefix( ) }{ mr_abapsdk_package_manager->build_jsonfile_name( i_operation = wa_zipfile_uninst-op i_version = lv_version ) }|.
+        wa_zipfile_uninst-json_web = |{ mr_sdk_package_manager->file_manager->build_download_uri_prefix( ) }{ mr_sdk_package_manager->file_manager->build_jsonfile_name( i_operation = wa_zipfile_uninst-op i_version = lv_version ) }|.
 
-        wa_zipfile_uninst-path = mr_abapsdk_package_manager->build_zipfile_path( i_zipfile_name       = lv_zipfile_name_uninst
-                                                                                 i_trans_logical_path = mr_abapsdk_package_manager->c_trans_logical_path ).
+        wa_zipfile_uninst-path = mr_sdk_package_manager->file_manager->build_zipfile_path( i_zipfile_name       = lv_zipfile_name_uninst
+                                                                                           i_trans_logical_path = lif_sdk_file_manager=>c_trans_logical_path ).
 
-        mr_abapsdk_package_manager->validate_zipfile_path( i_zipfile_path   = wa_zipfile_uninst-path
-                                                           i_logsubdir_name = mr_abapsdk_package_manager->c_logsubdir_name ).
+        mr_sdk_package_manager->file_manager->validate_zipfile_path( i_zipfile_path   = wa_zipfile_uninst-path
+                                                                     i_logsubdir_name = lif_sdk_file_manager=>c_logsubdir_name ).
 
-        APPEND wa_zipfile_uninst TO mr_abapsdk_package_manager->mt_abapsdk_zipfiles.
+        APPEND wa_zipfile_uninst TO mr_sdk_package_manager->mt_abapsdk_zipfiles.
         APPEND wa_zipfile_uninst TO lt_abapsdk_zipfiles.
 
-        IF mr_abapsdk_package_manager->check_file_exists_at( lt_abapsdk_zipfiles[ op = 'uninstall' version = lv_version ]-path ) = abap_false.
+        IF mr_sdk_package_manager->file_manager->check_file_exists_at( lt_abapsdk_zipfiles[ op = 'uninstall' version = lv_version ]-path ) = abap_false.
           MESSAGE |ABAP SDK zipfiles for uninstallation in version { lv_version } not present on system. Downloading them now.| TYPE 'I' ##NO_TEXT.
-          lv_dl_result = mr_abapsdk_package_manager->download_abapsdk_zipfiles( i_file_list = mr_abapsdk_package_manager->mt_abapsdk_zipfiles
-                                                                                i_version   = lv_version ).
+          lv_dl_result = mr_sdk_package_manager->download_abapsdk_zipfiles( i_file_list = mr_sdk_package_manager->mt_abapsdk_zipfiles
+                                                                            i_version   = lv_version ).
         ELSE.
           lv_dl_result = abap_true.
         ENDIF.
@@ -4168,19 +4241,19 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
     DATA lv_dl_result TYPE abap_bool.
     lv_result = abap_true.
 
-    DATA(lt_mod_avail_inst_zip) = mr_abapsdk_package_manager->get_abapsdk_avail_modules_json( i_operation = 'install'
-                                                                                              i_source    = 'zip'
-                                                                                              i_version   = 'LATEST' ).
-    DATA(lt_mod_avail_uninst_zip) = mr_abapsdk_package_manager->get_abapsdk_avail_modules_json( i_operation = 'uninstall'
-                                                                                                i_source    = 'zip'
-                                                                                                i_version   = 'LATEST' ).
+    DATA(lt_mod_avail_inst_zip) = mr_sdk_package_manager->get_abapsdk_avail_modules_json( i_operation = 'install'
+                                                                                          i_source    = 'zip'
+                                                                                          i_version   = 'LATEST' ).
+    DATA(lt_mod_avail_uninst_zip) = mr_sdk_package_manager->get_abapsdk_avail_modules_json( i_operation = 'uninstall'
+                                                                                            i_source    = 'zip'
+                                                                                            i_version   = 'LATEST' ).
 
     IF lcl_utils=>cmp_version_string( i_string1 = mt_available_modules_inst[ tla = 'core' ]-avers
                                                        i_string2 = lt_mod_avail_inst_zip[ tla = 'core' ]-avers ) = 1
         OR lcl_utils=>cmp_version_string( i_string1 = mt_available_modules_uninst[ tla = 'core' ]-avers
                                                        i_string2 = lt_mod_avail_uninst_zip[ tla = 'core' ]-avers ) = 1.
       MESSAGE 'One or more ABAP SDK zipfiles not current. Downloading new version now.' TYPE 'I' ##NO_TEXT.
-      lv_dl_result = mr_abapsdk_package_manager->download_abapsdk_zipfiles( i_file_list = mr_abapsdk_package_manager->mt_abapsdk_zipfiles ).
+      lv_dl_result = mr_sdk_package_manager->download_abapsdk_zipfiles( i_file_list = mr_sdk_package_manager->mt_abapsdk_zipfiles ).
       IF lv_dl_result = abap_false.
         MESSAGE 'One or more ABAP SDK zipfiles could not be successfully downloaded, aborting' TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
         lv_result = abap_false.
@@ -4522,9 +4595,9 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 
             ENDIF.
 
-            mr_abapsdk_package_manager->run_foreground( i_modules_to_be_installed = mt_modules_to_be_installed
-                                                        i_modules_to_be_deleted   = mt_modules_to_be_deleted
-                                                        i_target_version          = lv_target_version ).
+            mr_sdk_package_manager->run_foreground( i_modules_to_be_installed = mt_modules_to_be_installed
+                                                    i_modules_to_be_deleted   = mt_modules_to_be_deleted
+                                                    i_target_version          = lv_target_version ).
             refresh( ).
 
           WHEN 'BTCH' OR 'EXE_BGND'.
@@ -4564,9 +4637,9 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 
 
 
-            l_jobnumber = mr_abapsdk_package_manager->submit_batch_job( i_modules_to_be_installed = mt_modules_to_be_installed
-                                                                        i_modules_to_be_deleted   = mt_modules_to_be_deleted
-                                                                        i_target_version          = lv_target_version ).
+            l_jobnumber = mr_sdk_package_manager->submit_batch_job( i_modules_to_be_installed = mt_modules_to_be_installed
+                                                                    i_modules_to_be_deleted   = mt_modules_to_be_deleted
+                                                                    i_target_version          = lv_target_version ).
 
             CONCATENATE `Submitted job with number ` l_jobnumber INTO l_job_message ##NO_TEXT.
             MESSAGE i000(0k) WITH l_job_message.
@@ -4607,9 +4680,9 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 
             ENDIF.
 
-            mr_abapsdk_package_manager->run_foreground( i_modules_to_be_installed = mt_modules_to_be_installed
-                                                        i_modules_to_be_deleted   = mt_modules_to_be_deleted
-                                                        i_target_version          = lv_target_version ). " empty since modules tbd are not collected here
+            mr_sdk_package_manager->run_foreground( i_modules_to_be_installed = mt_modules_to_be_installed
+                                                    i_modules_to_be_deleted   = mt_modules_to_be_deleted
+                                                    i_target_version          = lv_target_version ). " empty since modules tbd are not collected here
             refresh( ).
 
           WHEN 'INS_BGND'.
@@ -4647,9 +4720,9 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 
             ENDIF.
 
-            l_jobnumber = mr_abapsdk_package_manager->submit_batch_job( i_modules_to_be_installed = mt_modules_to_be_installed
-                                                                        i_modules_to_be_deleted   = mt_modules_to_be_deleted
-                                                                        i_target_version          = lv_target_version ). " empty since modules tbd are not collected here
+            l_jobnumber = mr_sdk_package_manager->submit_batch_job( i_modules_to_be_installed = mt_modules_to_be_installed
+                                                                    i_modules_to_be_deleted   = mt_modules_to_be_deleted
+                                                                    i_target_version          = lv_target_version ). " empty since modules tbd are not collected here
 
             CONCATENATE `Submitted job with number ` l_jobnumber INTO l_job_message ##NO_TEXT.
             MESSAGE i000(0k) WITH l_job_message.
@@ -4691,9 +4764,9 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 
             ENDIF.
 
-            mr_abapsdk_package_manager->run_foreground( i_modules_to_be_installed = mt_modules_to_be_installed " empty since modules tbi are not collected here
-                                                        i_modules_to_be_deleted   = mt_modules_to_be_deleted
-                                                        i_target_version          = lv_target_version ).
+            mr_sdk_package_manager->run_foreground( i_modules_to_be_installed = mt_modules_to_be_installed " empty since modules tbi are not collected here
+                                                    i_modules_to_be_deleted   = mt_modules_to_be_deleted
+                                                    i_target_version          = lv_target_version ).
             refresh( ).
 
           WHEN 'DEL_BGND'.
@@ -4731,9 +4804,9 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 
             ENDIF.
 
-            l_jobnumber = mr_abapsdk_package_manager->submit_batch_job( i_modules_to_be_installed = mt_modules_to_be_installed " empty since modules tbi are not collected here
-                                                                        i_modules_to_be_deleted   = mt_modules_to_be_deleted
-                                                                        i_target_version          = lv_target_version ).
+            l_jobnumber = mr_sdk_package_manager->submit_batch_job( i_modules_to_be_installed = mt_modules_to_be_installed " empty since modules tbi are not collected here
+                                                                    i_modules_to_be_deleted   = mt_modules_to_be_deleted
+                                                                    i_target_version          = lv_target_version ).
 
             CONCATENATE `Submitted job with number ` l_jobnumber INTO l_job_message ##NO_TEXT.
             MESSAGE i000(0k) WITH l_job_message.
@@ -4762,7 +4835,7 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 
           WHEN 'DOW_TRAK'.
 
-            mr_abapsdk_package_manager->download_abapsdk_zipfiles( i_file_list = mr_abapsdk_package_manager->mt_abapsdk_zipfiles ).
+            mr_sdk_package_manager->download_abapsdk_zipfiles( i_file_list = mr_sdk_package_manager->mt_abapsdk_zipfiles ).
 
           WHEN 'INS_ALL'.
 
@@ -4770,7 +4843,7 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 *
 *            CLEAR: mt_modules_to_be_installed.
 *            CLEAR: mt_modules_to_be_deleted.
-*            DATA(lt_available_modules_cv) = mr_abapsdk_package_manager->get_abapsdk_avail_modules_json( i_operation = 'install'
+*            DATA(lt_available_modules_cv) = mr_sdk_package_manager->get_abapsdk_avail_modules_json( i_operation = 'install'
 *                                                                                                        i_source    = 'web'
 *                                                                                                        i_version   = lv_target_version ).
 *            DATA: wa_available_module_cv TYPE ts_abapsdk_module.
@@ -4799,7 +4872,7 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 *
 *            ENDIF.
 *
-*            l_jobnumber = mr_abapsdk_package_manager->submit_batch_job( i_modules_to_be_installed = mt_modules_to_be_installed
+*            l_jobnumber = mr_sdk_package_manager->submit_batch_job( i_modules_to_be_installed = mt_modules_to_be_installed
 *                                                                        i_modules_to_be_deleted   = mt_modules_to_be_deleted
 *                                                                        i_target_version          = lv_target_version ).
 
@@ -4835,8 +4908,8 @@ CLASS lcl_abapsdk_pm_tree_controller IMPLEMENTATION.
 
             IF lv_answer = 1.
 
-              l_jobnumber = mr_abapsdk_package_manager->install_all_modules( it_modules_to_be_installed = mt_modules_to_be_installed
-                                                                             it_modules_to_be_deleted   = mt_modules_to_be_deleted ).
+              l_jobnumber = mr_sdk_package_manager->install_all_modules( it_modules_to_be_installed = mt_modules_to_be_installed
+                                                                         it_modules_to_be_deleted   = mt_modules_to_be_deleted ).
 
               CONCATENATE `Submitted job with number ` l_jobnumber INTO l_job_message ##NO_TEXT.
               MESSAGE i000(0k) WITH l_job_message.
@@ -5110,10 +5183,10 @@ ENDCLASS.
 CLASS lcl_main IMPLEMENTATION.
   METHOD main.
     IF sy-batch = abap_true.
-      DATA(abapsdk_pm_batch) = NEW lcl_abapsdk_package_manager( i_batch_mode = sy-batch ).
+      DATA(abapsdk_pm_batch) = NEW lcl_sdk_package_manager( i_batch_mode = sy-batch ).
     ELSE.
-      DATA(abapsdk_pm) = NEW lcl_abapsdk_package_manager( ).
-      DATA(abapsdk_pm_tc) = NEW lcl_abapsdk_pm_tree_controller( ir_abapsdk_package_manager = abapsdk_pm ).
+      DATA(abapsdk_pm) = NEW lcl_sdk_package_manager( ).
+      DATA(abapsdk_pm_tc) = NEW lcl_ui_tree_controller( ir_sdk_package_manager = abapsdk_pm ).
     ENDIF.
   ENDMETHOD.
 ENDCLASS.
