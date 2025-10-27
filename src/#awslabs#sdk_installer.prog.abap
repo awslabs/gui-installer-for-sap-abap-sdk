@@ -28,13 +28,15 @@ INTERFACE lif_sdk_internet_manager DEFERRED.
 INTERFACE lif_sdk_report_update_manager DEFERRED.
 INTERFACE lif_sdk_certificate_manager DEFERRED.
 INTERFACE lif_sdk_file_manager DEFERRED.
-INTERFACE lif_sdk_tms_manager DEFERRED.
+INTERFACE lif_sdk_transport_manager DEFERRED.
+INTERFACE lif_sdk_job_manager DEFERRED.
 
 CLASS lcl_sdk_internet_manager DEFINITION DEFERRED.
 CLASS lcl_sdk_report_update_manager DEFINITION DEFERRED.
 CLASS lcl_sdk_certificate_manager DEFINITION DEFERRED.
 CLASS lcl_sdk_file_manager DEFINITION DEFERRED.
-CLASS lcl_sdk_tms_manager DEFINITION DEFERRED.
+CLASS lcl_sdk_transport_manager DEFINITION DEFERRED.
+CLASS lcl_sdk_job_manager DEFINITION DEFERRED.
 CLASS lcl_sdk_package_manager DEFINITION DEFERRED.
 CLASS lcl_ui_tree_controller DEFINITION DEFERRED.
 CLASS lcl_utils DEFINITION DEFERRED.
@@ -849,6 +851,9 @@ CLASS lcl_sdk_file_manager DEFINITION.
       validate_zipfile_path IMPORTING i_zipfile_path   TYPE string
                                       i_logsubdir_name TYPE fileintern
                             RETURNING VALUE(r_result)  TYPE abap_bool,
+      get_file_from_zip IMPORTING i_zipfile_absolute_path TYPE string
+                                  i_file_to_retrieve      TYPE string
+                        RETURNING VALUE(r_file_xstring)   TYPE xstring,
       check_file_writable_at IMPORTING i_path          TYPE string
                              RETURNING VALUE(r_result) TYPE abap_bool,
       check_file_exists_at IMPORTING i_path          TYPE string
@@ -951,6 +956,48 @@ CLASS lcl_sdk_file_manager IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD get_file_from_zip.
+    DATA lv_zipfile_content TYPE xstring.
+    TRY.
+        open_for_input( i_zipfile_absolute_path ).
+        READ DATASET i_zipfile_absolute_path INTO lv_zipfile_content.
+        CLOSE DATASET i_zipfile_absolute_path.
+      CATCH cx_sy_file_authority INTO DATA(r_ex1).
+        MESSAGE r_ex1->get_text( ) TYPE 'I' DISPLAY LIKE 'E'.
+        RETURN.
+      CATCH cx_sy_file_access_error INTO DATA(r_ex2).
+        MESSAGE r_ex2->get_text( ) TYPE 'I' DISPLAY LIKE 'E'.
+        RETURN.
+      CATCH cx_root INTO DATA(r_ex).
+        MESSAGE r_ex->get_text( ) TYPE 'I' DISPLAY LIKE 'E'.
+        RETURN.
+    ENDTRY.
+
+    DATA(r_zip) = NEW cl_abap_zip( ).
+
+    r_zip->load( zip = lv_zipfile_content ).
+
+    r_zip->get( EXPORTING  name                    = i_file_to_retrieve
+                IMPORTING  content                 = r_file_xstring
+                EXCEPTIONS zip_index_error         = 1
+                           zip_decompression_error = 2
+                           OTHERS                  = 3 ).
+
+    CASE sy-subrc.
+      WHEN 0.
+        " success
+      WHEN 1.
+        MESSAGE 'Zip Index Error' TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
+        RETURN.
+      WHEN 2.
+        MESSAGE 'Zip Decompression Error' TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
+        RETURN.
+      WHEN OTHERS.
+        MESSAGE 'Unknown Zip error' TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
+        RETURN.
+    ENDCASE.
+  ENDMETHOD.
+
 
   METHOD check_file_writable_at.
     TRY.
@@ -1035,24 +1082,43 @@ CLASS lcl_sdk_file_manager IMPLEMENTATION.
 ENDCLASS.
 
 
-INTERFACE lif_sdk_tms_manager.
+INTERFACE lif_sdk_transport_manager.
+
+  METHODS:
+    get_sdk_cofile_from_zip IMPORTING i_tla                   TYPE ts_abapsdk_module-tla
+                                      i_transport             TYPE ts_abapsdk_module-atransport
+                                      i_operation             TYPE string
+                                      i_version               TYPE string
+                                      i_zipfile_absolute_path TYPE string
+                            EXPORTING e_cofile_name           TYPE string
+                                      e_cofile_blob           TYPE xstring,
+    get_sdk_datafile_from_zip IMPORTING i_tla                   TYPE ts_abapsdk_module-tla
+                                        i_transport             TYPE ts_abapsdk_module-atransport
+                                        i_operation             TYPE string
+                                        i_version               TYPE string
+                                        i_zipfile_absolute_path TYPE string
+                              EXPORTING e_datafile_name         TYPE string
+                                        e_datafile_blob         TYPE xstring,
+    write_sdk_transport_trdir IMPORTING i_cofile_name    TYPE string
+                                        i_datafile_name  TYPE string
+                                        i_cofile_blob    TYPE xstring
+                                        i_datafile_blob  TYPE xstring
+                              RETURNING VALUE(r_success) TYPE boolean
+                              RAISING   lcx_error,
+    import_sdk_transports IMPORTING it_transport_names TYPE stms_tr_requests
+                          EXPORTING e_tp_retcode       TYPE stpa-retcode
+                                    es_exception       TYPE stmscalert.
 
 ENDINTERFACE.
 
-CLASS lcl_sdk_tms_manager DEFINITION.
+CLASS lcl_sdk_transport_manager DEFINITION.
 
   PUBLIC SECTION.
     INTERFACES:
-      lif_sdk_tms_manager.
+      lif_sdk_transport_manager.
 
     METHODS:
-      constructor IMPORTING i_file_manager TYPE REF TO lcl_sdk_file_manager OPTIONAL,
-      write_transport_trdir IMPORTING i_cofile_name    TYPE string  " TODO: Separate class for transport management
-                                      i_datafile_name  TYPE string
-                                      i_cofile_blob    TYPE xstring
-                                      i_datafile_blob  TYPE xstring
-                            RETURNING VALUE(r_success) TYPE boolean
-                            RAISING   lcx_error.
+      constructor IMPORTING i_file_manager TYPE REF TO lcl_sdk_file_manager OPTIONAL.
 
   PRIVATE SECTION.
     DATA:
@@ -1060,7 +1126,7 @@ CLASS lcl_sdk_tms_manager DEFINITION.
 
 ENDCLASS.
 
-CLASS lcl_sdk_tms_manager IMPLEMENTATION.
+CLASS lcl_sdk_transport_manager IMPLEMENTATION.
 
   METHOD constructor.
 
@@ -1072,7 +1138,7 @@ CLASS lcl_sdk_tms_manager IMPLEMENTATION.
 
   ENDMETHOD.
 
-  METHOD write_transport_trdir.
+  METHOD lif_sdk_transport_manager~write_sdk_transport_trdir.
 
     DATA lv_rc TYPE i.
     DATA lv_validation_active TYPE abap_bool.
@@ -1174,6 +1240,251 @@ CLASS lcl_sdk_tms_manager IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD lif_sdk_transport_manager~get_sdk_cofile_from_zip.
+
+    DATA l_cofile_zip_path TYPE string.
+    DATA l_cofile_name TYPE string.
+    DATA l_cofile_blob TYPE xstring.
+
+    e_cofile_name = 'K' && i_transport+4 && '.' && i_transport+0(3).
+
+    l_cofile_zip_path = lif_sdk_file_manager=>c_transports_zip_path && i_tla && '/' && e_cofile_name.
+
+    e_cofile_blob = file_manager->get_file_from_zip( i_zipfile_absolute_path = i_zipfile_absolute_path
+                                                     i_file_to_retrieve      = l_cofile_zip_path ).
+
+  ENDMETHOD.
+
+
+  METHOD lif_sdk_transport_manager~get_sdk_datafile_from_zip.
+
+    DATA l_datafile_zip_path TYPE string.
+    DATA l_datafile_name TYPE string.
+    DATA l_datafile_blob TYPE xstring.
+
+
+    e_datafile_name = 'R' && i_transport+4 && '.' && i_transport+0(3).
+
+    l_datafile_zip_path = lif_sdk_file_manager=>c_transports_zip_path && i_tla && '/' && e_datafile_name.
+
+    e_datafile_blob = file_manager->get_file_from_zip( i_zipfile_absolute_path = i_zipfile_absolute_path
+                                                       i_file_to_retrieve      = l_datafile_zip_path ).
+
+
+  ENDMETHOD.
+
+
+
+  METHOD lif_sdk_transport_manager~import_sdk_transports.
+
+    DATA: l_system TYPE tmssysnam.
+    DATA: l_tp_ret_code TYPE stpa-retcode.
+    DATA: ls_exception TYPE stmscalert.
+
+    l_system = lcl_utils=>get_system_name( ).
+
+    " TODO: Needs to go into its own method
+    CALL FUNCTION 'TMS_MGR_FORWARD_TR_REQUEST'
+      EXPORTING
+        iv_request                 = 'SOME'
+        iv_tarcli                  = sy-mandt
+        iv_import_again            = abap_true
+        iv_target                  = l_system
+        it_requests                = it_transport_names
+      IMPORTING
+        ev_tp_ret_code             = l_tp_ret_code
+        es_exception               = ls_exception
+      EXCEPTIONS
+        read_config_failed         = 1
+        table_of_requests_is_empty = 2
+        OTHERS                     = 3.
+    CASE sy-subrc.
+      WHEN 0. " all good
+      WHEN 2. " empty import list
+      WHEN 4. " finished with warnings
+      WHEN OTHERS.
+        MESSAGE |Error forwarding requests to { l_system }| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
+    ENDCASE.
+
+    " TODO: DO SOMETHING USEFUL WITH THESE.
+    CLEAR: l_tp_ret_code.
+    CLEAR: ls_exception.
+
+* WARNING: Turning off offline processing (IV_OFFLINE = abap_false) makes the
+* FM call spawn a new logon session for every transport, which can lead to resource
+* exhaustion for very large module import numbers (> 200), check also SAP Profile
+* parameters rdisp/user_resource_limit and rdisp/tm_max_no
+* ADD: Turning on offline processing (IV_OFFLINE = abap_true) apparently leads to the
+* background job finishing prematurely, which is not desired.
+
+    IF sy-batch = abap_true.
+      CALL FUNCTION 'TMS_MGR_IMPORT_TR_REQUEST'
+        EXPORTING
+          iv_system                  = l_system
+          iv_request                 = 'SOME'
+          iv_client                  = sy-mandt
+          iv_import_again            = abap_true
+          iv_ignore_cvers            = abap_true
+          iv_offline                 = abap_false
+          iv_monitor                 = abap_false
+          it_requests                = it_transport_names
+        IMPORTING
+          ev_tp_ret_code             = l_tp_ret_code
+          es_exception               = ls_exception
+        EXCEPTIONS
+          read_config_failed         = 1
+          table_of_requests_is_empty = 2
+          OTHERS                     = 3.
+      CASE sy-subrc.
+        WHEN 0. " all good
+        WHEN 2. " empty import list
+        WHEN 4. " finished with warnings
+          WHEN OTHERS: .
+          MESSAGE |Error importing requests to { l_system }| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
+      ENDCASE.
+    ELSE.
+      CALL FUNCTION 'TMS_MGR_IMPORT_TR_REQUEST'
+        EXPORTING
+          iv_system                  = l_system
+          iv_request                 = 'SOME'
+          iv_client                  = sy-mandt
+          iv_import_again            = abap_true
+          iv_ignore_cvers            = abap_true
+          iv_offline                 = abap_false
+          iv_monitor                 = abap_true
+          it_requests                = it_transport_names
+        IMPORTING
+          ev_tp_ret_code             = l_tp_ret_code
+          es_exception               = ls_exception
+        EXCEPTIONS
+          read_config_failed         = 1
+          table_of_requests_is_empty = 2
+          OTHERS                     = 3.
+      CASE sy-subrc.
+        WHEN 0. " all good
+        WHEN 2. " empty import list
+        WHEN 4. " finished with warnings
+        WHEN OTHERS.
+          MESSAGE |Error importing requests to { l_system }| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
+      ENDCASE.
+    ENDIF.
+
+    e_tp_retcode = l_tp_ret_code.
+    es_exception = ls_exception.
+
+
+  ENDMETHOD.
+
+
+ENDCLASS.
+
+
+INTERFACE lif_sdk_job_manager.
+
+    METHODS:
+      get_running_jobs IMPORTING i_jobname       TYPE syst_repi2
+                       RETURNING VALUE(r_result) TYPE tbtcjob_tt,
+      is_job_running RETURNING VALUE(r_result) TYPE abap_bool,
+      submit_batch_job IMPORTING i_modules_to_be_installed TYPE tt_abapsdk_tla
+                                 i_modules_to_be_deleted   TYPE tt_abapsdk_tla
+                                 i_target_version          TYPE string
+                       RETURNING VALUE(r_result)           TYPE tbtco-jobcount
+                       RAISING   lcx_error.
+
+ENDINTERFACE.
+
+
+CLASS lcl_sdk_job_manager DEFINITION FINAL.
+
+  PUBLIC SECTION.
+    INTERFACES:
+      lif_sdk_job_manager.
+
+ENDCLASS.
+
+
+CLASS lcl_sdk_job_manager IMPLEMENTATION.
+
+METHOD lif_sdk_job_manager~submit_batch_job.
+
+    DATA(lt_modules_to_be_installed) = i_modules_to_be_installed.
+    DATA(lt_modules_to_be_deleted) = i_modules_to_be_deleted.
+    DATA(lv_target_version) = i_target_version.
+
+
+    " Export to shared memory and batch job submission need to go together
+    DELETE FROM SHARED BUFFER indx(mi) ID 'MOD_INST'.
+    EXPORT st_modules_to_be_installed = lt_modules_to_be_installed TO SHARED BUFFER indx(mi) ID 'MOD_INST'.
+    DELETE FROM SHARED BUFFER indx(md) ID 'MOD_DELE'.
+    EXPORT st_modules_to_be_deleted = lt_modules_to_be_deleted TO SHARED BUFFER indx(md) ID 'MOD_DELE'.
+    DELETE FROM SHARED BUFFER indx(tv) ID 'TAR_VERS'.
+    EXPORT s_target_version = lv_target_version TO SHARED BUFFER indx(tv) ID 'TAR_VERS'.
+
+
+    DATA(lo_job) = NEW cl_bp_abap_job( ).
+    lo_job->set_name( CONV char32( sy-repid ) ).
+    lo_job->set_report( sy-repid ).
+    lo_job->if_bp_job_engine~generate_job_count(
+      EXCEPTIONS
+        cant_create_job  = 1
+        invalid_job_data = 2
+        jobname_missing  = 3 ).
+    IF sy-subrc = 0.
+      lo_job->if_bp_job_engine~plan_job_step(
+        EXCEPTIONS
+          bad_priparams           = 11
+          bad_xpgflags            = 12
+          invalid_jobdata         = 13
+          jobname_missing         = 14
+          job_notex               = 15
+          job_submit_failed       = 16
+          program_missing         = 17
+          prog_abap_and_extpg_set = 18 ).
+    ENDIF.
+    IF sy-subrc = 0.
+      lo_job->if_bp_job_engine~start_immediately( EXCEPTIONS cant_start_immediate = 21 invalid_startdate = 22 jobname_missing = 23 job_close_failed = 24 job_nosteps = 25 job_notex = 26 ).
+    ENDIF.
+
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Failed to submit job { sy-repid }: subrc = { sy-subrc }| ##NO_TEXT.
+    ENDIF.
+
+    r_result = lo_job->jobcount.
+
+  ENDMETHOD.
+
+METHOD lif_sdk_job_manager~get_running_jobs.
+    " --- Job already running?
+    CALL FUNCTION 'BP_FIND_JOBS_WITH_PROGRAM'
+      EXPORTING
+        abap_program_name             = i_jobname
+        status                        = 'R'  " Batch job already running in background?
+      TABLES
+        joblist                       = r_result
+      EXCEPTIONS
+        no_jobs_found                 = 1
+        program_specification_missing = 2
+        invalid_dialog_type           = 3
+        job_find_canceled             = 4
+        OTHERS                        = 5.
+    IF sy-subrc <> 0.
+* Implement suitable error handling here
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD lif_sdk_job_manager~is_job_running.
+
+    DATA lt_joblist TYPE TABLE OF tbtcjob.
+    lt_joblist = lif_sdk_job_manager~get_running_jobs( i_jobname = sy-repid ).
+
+    IF lines( lt_joblist ) > 0.
+      r_result = abap_true.
+    ELSE.
+      r_result = abap_false.
+    ENDIF.
+
+  ENDMETHOD.
+
 ENDCLASS.
 
 
@@ -1193,7 +1504,8 @@ CLASS lcl_sdk_package_manager DEFINITION FINAL FRIENDS lcl_ui_tree_controller.
                             i_internet_manager    TYPE REF TO lif_sdk_internet_manager OPTIONAL
                             i_certificate_manager TYPE REF TO lcl_sdk_certificate_manager OPTIONAL
                             i_file_manager        TYPE REF TO lcl_sdk_file_manager OPTIONAL
-                            i_tms_manager         TYPE REF TO lcl_sdk_tms_manager OPTIONAL
+                            i_transport_manager   TYPE REF TO lif_sdk_transport_manager OPTIONAL
+                            i_job_manager   type ref to lif_sdk_job_manager OPTIONAL
                   RAISING   lcx_error,
       install_all_modules IMPORTING it_modules_to_be_installed TYPE tt_abapsdk_tla
                                     it_modules_to_be_deleted   TYPE tt_abapsdk_tla
@@ -1203,9 +1515,7 @@ CLASS lcl_sdk_package_manager DEFINITION FINAL FRIENDS lcl_ui_tree_controller.
                                           i_version        TYPE string DEFAULT 'LATEST'
                                 RETURNING VALUE(r_success) TYPE abap_bool
                                 RAISING   lcx_error,
-      get_file_from_zip IMPORTING i_zipfile_absolute_path TYPE string
-                                  i_file_to_retrieve      TYPE string
-                        RETURNING VALUE(r_file_xstring)   TYPE xstring,
+
       get_abapsdk_installed_modules RETURNING VALUE(r_installed_modules) TYPE tt_abapsdk_module
                                     RAISING   lcx_error,
       get_abapsdk_deprecated_mod_ins RETURNING VALUE(r_deprecated_modules) TYPE tt_abapsdk_module,
@@ -1214,23 +1524,6 @@ CLASS lcl_sdk_package_manager DEFINITION FINAL FRIENDS lcl_ui_tree_controller.
                                                i_version                  TYPE string DEFAULT 'LATEST'
                                      RETURNING VALUE(r_available_modules) TYPE tt_abapsdk_module
                                      RAISING   lcx_error,
-      get_abapsdk_transport_cofile IMPORTING i_tla         TYPE ts_abapsdk_module-tla
-                                             i_transport   TYPE ts_abapsdk_module-atransport
-                                             i_operation   TYPE string
-                                             i_version     TYPE string
-                                   EXPORTING e_cofile_name TYPE string
-                                             e_cofile_blob TYPE xstring,
-      get_abapsdk_transport_datafile IMPORTING i_tla           TYPE ts_abapsdk_module-tla
-                                               i_transport     TYPE ts_abapsdk_module-atransport
-                                               i_operation     TYPE string
-                                               i_version       TYPE string
-                                     EXPORTING e_datafile_name TYPE string
-                                               e_datafile_blob TYPE xstring,
-      import_abapsdk_transports IMPORTING it_transport_names TYPE stms_tr_requests
-                                EXPORTING e_tp_retcode       TYPE stpa-retcode
-                                          es_exception       TYPE stmscalert,
-      get_running_jobs IMPORTING i_jobname       TYPE syst_repi2
-                       RETURNING VALUE(r_result) TYPE tbtcjob_tt,
       run_foreground IMPORTING i_modules_to_be_installed TYPE tt_abapsdk_tla
                                i_modules_to_be_deleted   TYPE tt_abapsdk_tla
                                i_target_version          TYPE string
@@ -1240,12 +1533,7 @@ CLASS lcl_sdk_package_manager DEFINITION FINAL FRIENDS lcl_ui_tree_controller.
                                es_exception_uninst       TYPE stmscalert
                      RAISING   lcx_error,
       run_background RAISING   lcx_error,
-      submit_batch_job IMPORTING i_modules_to_be_installed TYPE tt_abapsdk_tla
-                                 i_modules_to_be_deleted   TYPE tt_abapsdk_tla
-                                 i_target_version          TYPE string
-                       RETURNING VALUE(r_result)           TYPE tbtco-jobcount
-                       RAISING   lcx_error,
-      is_job_running RETURNING VALUE(r_result) TYPE abap_bool,
+
       check_abapsdk_zipfile_exists IMPORTING i_operation     TYPE string
                                              i_version       TYPE string
                                    RETURNING VALUE(r_result) TYPE abap_bool,
@@ -1267,7 +1555,8 @@ CLASS lcl_sdk_package_manager DEFINITION FINAL FRIENDS lcl_ui_tree_controller.
     DATA: internet_manager TYPE REF TO lif_sdk_internet_manager.
     DATA: certificate_manager TYPE REF TO lcl_sdk_certificate_manager. " TODO: Fix class so the interface can be used instead
     DATA: file_manager TYPE REF TO lcl_sdk_file_manager. " TODO: Fix class so the interface can be used instead
-    DATA: tms_manager TYPE REF TO lcl_sdk_tms_manager. " TODO: interface instead of class
+    DATA: transport_manager TYPE REF TO lif_sdk_transport_manager.
+    data: job_manager type ref to lif_sdk_job_manager.
 
 ENDCLASS.
 
@@ -1299,11 +1588,18 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
       file_manager =     file_manager = NEW lcl_sdk_file_manager( ).
     ENDIF.
 
-    IF i_tms_manager IS BOUND.
-      tms_manager = i_tms_manager.
+    IF i_transport_manager IS BOUND.
+      transport_manager = i_transport_manager.
     ELSE.
-      tms_manager = NEW lcl_sdk_tms_manager( ).
+      transport_manager = NEW lcl_sdk_transport_manager( ).
     ENDIF.
+
+    if i_job_manager is bound.
+        job_manager = i_job_manager.
+    else.
+        job_manager = NEW lcl_sdk_job_manager( ).
+    endif.
+
 
     DATA wa_zipfile_inst TYPE ts_abapsdk_zip.
     wa_zipfile_inst-op = 'install' ##NO_TEXT.
@@ -1401,7 +1697,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
 
     ENDIF.
 
-    r_jobnumber = submit_batch_job( i_modules_to_be_installed = lt_modules_to_be_installed
+    r_jobnumber = job_manager->submit_batch_job( i_modules_to_be_installed = lt_modules_to_be_installed
                                     i_modules_to_be_deleted   = lt_modules_to_be_deleted
                                     i_target_version          = lv_target_version ).
 
@@ -1593,6 +1889,8 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
 
   ENDMETHOD.
 
+
+
   METHOD get_abapsdk_deprecated_mod_ins.
 
     TRY.
@@ -1617,47 +1915,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD get_file_from_zip.
-    DATA lv_zipfile_content TYPE xstring.
-    TRY.
-        file_manager->open_for_input( i_zipfile_absolute_path ).
-        READ DATASET i_zipfile_absolute_path INTO lv_zipfile_content.
-        CLOSE DATASET i_zipfile_absolute_path.
-      CATCH cx_sy_file_authority INTO DATA(r_ex1).
-        MESSAGE r_ex1->get_text( ) TYPE 'I' DISPLAY LIKE 'E'.
-        RETURN.
-      CATCH cx_sy_file_access_error INTO DATA(r_ex2).
-        MESSAGE r_ex2->get_text( ) TYPE 'I' DISPLAY LIKE 'E'.
-        RETURN.
-      CATCH cx_root INTO DATA(r_ex).
-        MESSAGE r_ex->get_text( ) TYPE 'I' DISPLAY LIKE 'E'.
-        RETURN.
-    ENDTRY.
 
-    DATA(r_zip) = NEW cl_abap_zip( ).
-
-    r_zip->load( zip = lv_zipfile_content ).
-
-    r_zip->get( EXPORTING  name                    = i_file_to_retrieve
-                IMPORTING  content                 = r_file_xstring
-                EXCEPTIONS zip_index_error         = 1
-                           zip_decompression_error = 2
-                           OTHERS                  = 3 ).
-
-    CASE sy-subrc.
-      WHEN 0.
-        " success
-      WHEN 1.
-        MESSAGE 'Zip Index Error' TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-        RETURN.
-      WHEN 2.
-        MESSAGE 'Zip Decompression Error' TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-        RETURN.
-      WHEN OTHERS.
-        MESSAGE 'Unknown Zip error' TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-        RETURN.
-    ENDCASE.
-  ENDMETHOD.
 
   METHOD get_abapsdk_avail_modules_json.
 
@@ -1673,8 +1931,8 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
 
       WHEN 'zip'.
 
-        l_jsonx = get_file_from_zip( i_zipfile_absolute_path = mt_abapsdk_zipfiles[ op = i_operation version = i_version ]-path
-                                     i_file_to_retrieve      = lif_sdk_file_manager=>c_sdk_index_json_zip_path ).
+        l_jsonx = file_manager->get_file_from_zip( i_zipfile_absolute_path = mt_abapsdk_zipfiles[ op = i_operation version = i_version ]-path
+                                                   i_file_to_retrieve      = lif_sdk_file_manager=>c_sdk_index_json_zip_path ).
 
       WHEN 'others'.
 
@@ -1804,179 +2062,10 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
 
   ENDMETHOD.
 
-  METHOD get_abapsdk_transport_cofile.
-
-    DATA l_cofile_zip_path TYPE string.
-    DATA l_cofile_name TYPE string.
-    DATA l_cofile_blob TYPE xstring.
-
-    e_cofile_name = 'K' && i_transport+4 && '.' && i_transport+0(3).
-
-    l_cofile_zip_path = lif_sdk_file_manager=>c_transports_zip_path && i_tla && '/' && e_cofile_name.
-
-    e_cofile_blob = get_file_from_zip( i_zipfile_absolute_path = mt_abapsdk_zipfiles[ op = i_operation version = i_version ]-path
-                                       i_file_to_retrieve      = l_cofile_zip_path ).
-
-  ENDMETHOD.
-
-
-  METHOD get_abapsdk_transport_datafile.
-
-    DATA l_datafile_zip_path TYPE string.
-    DATA l_datafile_name TYPE string.
-    DATA l_datafile_blob TYPE xstring.
-
-
-    e_datafile_name = 'R' && i_transport+4 && '.' && i_transport+0(3).
-
-    l_datafile_zip_path = lif_sdk_file_manager=>c_transports_zip_path && i_tla && '/' && e_datafile_name.
-
-    e_datafile_blob = get_file_from_zip( i_zipfile_absolute_path = mt_abapsdk_zipfiles[ op = i_operation version = i_version ]-path
-                                         i_file_to_retrieve      = l_datafile_zip_path ).
-
-
-  ENDMETHOD.
-
-
-  METHOD import_abapsdk_transports.
-
-    DATA: l_system TYPE tmssysnam.
-    DATA: l_tp_ret_code TYPE stpa-retcode.
-    DATA: ls_exception TYPE stmscalert.
-
-    l_system = lcl_utils=>get_system_name( ).
-
-    " TODO: Needs to go into its own method
-    CALL FUNCTION 'TMS_MGR_FORWARD_TR_REQUEST'
-      EXPORTING
-        iv_request                 = 'SOME'
-        iv_tarcli                  = sy-mandt
-        iv_import_again            = abap_true
-        iv_target                  = l_system
-        it_requests                = it_transport_names
-      IMPORTING
-        ev_tp_ret_code             = l_tp_ret_code
-        es_exception               = ls_exception
-      EXCEPTIONS
-        read_config_failed         = 1
-        table_of_requests_is_empty = 2
-        OTHERS                     = 3.
-    CASE sy-subrc.
-      WHEN 0. " all good
-      WHEN 2. " empty import list
-      WHEN 4. " finished with warnings
-      WHEN OTHERS.
-        MESSAGE |Error forwarding requests to { l_system }| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-    ENDCASE.
-
-    " TODO: DO SOMETHING USEFUL WITH THESE.
-    CLEAR: l_tp_ret_code.
-    CLEAR: ls_exception.
-
-* WARNING: Turning off offline processing (IV_OFFLINE = abap_false) makes the
-* FM call spawn a new logon session for every transport, which can lead to resource
-* exhaustion for very large module import numbers (> 200), check also SAP Profile
-* parameters rdisp/user_resource_limit and rdisp/tm_max_no
-* ADD: Turning on offline processing (IV_OFFLINE = abap_true) apparently leads to the
-* background job finishing prematurely, which is not desired.
-
-    IF sy-batch = abap_true.
-      CALL FUNCTION 'TMS_MGR_IMPORT_TR_REQUEST'
-        EXPORTING
-          iv_system                  = l_system
-          iv_request                 = 'SOME'
-          iv_client                  = sy-mandt
-          iv_import_again            = abap_true
-          iv_ignore_cvers            = abap_true
-          iv_offline                 = abap_false
-          iv_monitor                 = abap_false
-          it_requests                = it_transport_names
-        IMPORTING
-          ev_tp_ret_code             = l_tp_ret_code
-          es_exception               = ls_exception
-        EXCEPTIONS
-          read_config_failed         = 1
-          table_of_requests_is_empty = 2
-          OTHERS                     = 3.
-      CASE sy-subrc.
-        WHEN 0. " all good
-        WHEN 2. " empty import list
-        WHEN 4. " finished with warnings
-          WHEN OTHERS: .
-          MESSAGE |Error importing requests to { l_system }| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-      ENDCASE.
-    ELSE.
-      CALL FUNCTION 'TMS_MGR_IMPORT_TR_REQUEST'
-        EXPORTING
-          iv_system                  = l_system
-          iv_request                 = 'SOME'
-          iv_client                  = sy-mandt
-          iv_import_again            = abap_true
-          iv_ignore_cvers            = abap_true
-          iv_offline                 = abap_false
-          iv_monitor                 = abap_true
-          it_requests                = it_transport_names
-        IMPORTING
-          ev_tp_ret_code             = l_tp_ret_code
-          es_exception               = ls_exception
-        EXCEPTIONS
-          read_config_failed         = 1
-          table_of_requests_is_empty = 2
-          OTHERS                     = 3.
-      CASE sy-subrc.
-        WHEN 0. " all good
-        WHEN 2. " empty import list
-        WHEN 4. " finished with warnings
-        WHEN OTHERS.
-          MESSAGE |Error importing requests to { l_system }| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-      ENDCASE.
-    ENDIF.
-
-    e_tp_retcode = l_tp_ret_code.
-    es_exception = ls_exception.
-
-
-  ENDMETHOD.
 
 
 
 
-
-
-  METHOD get_running_jobs.
-    " --- Job already running?
-    CALL FUNCTION 'BP_FIND_JOBS_WITH_PROGRAM'
-      EXPORTING
-        abap_program_name             = i_jobname
-        status                        = 'R'  " Batch job already running in background?
-      TABLES
-        joblist                       = r_result
-      EXCEPTIONS
-        no_jobs_found                 = 1
-        program_specification_missing = 2
-        invalid_dialog_type           = 3
-        job_find_canceled             = 4
-        OTHERS                        = 5.
-    IF sy-subrc <> 0.
-* Implement suitable error handling here
-    ENDIF.
-  ENDMETHOD.
-
-
-
-
-  METHOD is_job_running.
-
-    DATA lt_joblist TYPE TABLE OF tbtcjob.
-    lt_joblist = get_running_jobs( i_jobname = sy-repid ).
-
-    IF lines( lt_joblist ) > 0.
-      r_result = abap_true.
-    ELSE.
-      r_result = abap_false.
-    ENDIF.
-
-  ENDMETHOD.
 
 
   METHOD update_abapsdk_zipfile_paths.
@@ -2148,29 +2237,31 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
 
     LOOP AT lt_modules_to_be_installed ASSIGNING FIELD-SYMBOL(<fs_module_to_be_installed>).
 
-      get_abapsdk_transport_cofile(
+      transport_manager->get_sdk_cofile_from_zip(
         EXPORTING
-          i_tla         = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla
-          i_transport   = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
-          i_operation   = 'install'
-          i_version     = i_target_version
+          i_tla                   = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla
+          i_transport             = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
+          i_operation             = 'install'
+          i_version               = i_target_version
+          i_zipfile_absolute_path = mt_abapsdk_zipfiles[ op = 'install' version = i_target_version ]-path
         IMPORTING
-          e_cofile_name = DATA(l_cofile_name)
-          e_cofile_blob = DATA(l_cofile_blob) ).
+          e_cofile_name           = DATA(l_cofile_name)
+          e_cofile_blob           = DATA(l_cofile_blob) ).
 
 
-      get_abapsdk_transport_datafile(
+      transport_manager->get_sdk_datafile_from_zip(
         EXPORTING
-          i_tla           = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla
-          i_transport     = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
-          i_operation     = 'install'
-          i_version       = i_target_version
+          i_tla                   = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla
+          i_transport             = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
+          i_operation             = 'install'
+          i_version               = i_target_version
+          i_zipfile_absolute_path = mt_abapsdk_zipfiles[ op = 'install' version = i_target_version ]-path
         IMPORTING
-          e_datafile_name = DATA(l_datafile_name)
-          e_datafile_blob = DATA(l_datafile_blob) ).
+          e_datafile_name         = DATA(l_datafile_name)
+          e_datafile_blob         = DATA(l_datafile_blob) ).
 
 
-      DATA(l_success_write) = tms_manager->write_transport_trdir(
+      DATA(l_success_write) = transport_manager->write_sdk_transport_trdir(
         i_cofile_name   = l_cofile_name
         i_datafile_name = l_datafile_name
         i_cofile_blob   = l_cofile_blob
@@ -2183,7 +2274,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
 
     ENDLOOP.
 
-    CALL METHOD import_abapsdk_transports
+    CALL METHOD transport_manager->import_sdk_transports
       EXPORTING
         it_transport_names = lt_transport_list_inst
       IMPORTING
@@ -2207,29 +2298,31 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
       ).
 
 
-      get_abapsdk_transport_cofile(
+      transport_manager->get_sdk_cofile_from_zip(
         EXPORTING
-          i_tla         = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-tla
-          i_transport   = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
-          i_operation   = 'uninstall'
-          i_version     = i_target_version
+          i_tla                   = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-tla
+          i_transport             = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
+          i_operation             = 'uninstall'
+          i_version               = i_target_version
+          i_zipfile_absolute_path = mt_abapsdk_zipfiles[ op = 'uninstall' version = i_target_version ]-path
         IMPORTING
-          e_cofile_name = DATA(l_uninstall_cofile_name)
-          e_cofile_blob = DATA(l_uninstall_cofile_blob) ).
+          e_cofile_name           = DATA(l_uninstall_cofile_name)
+          e_cofile_blob           = DATA(l_uninstall_cofile_blob) ).
 
 
-      get_abapsdk_transport_datafile(
+      transport_manager->get_sdk_datafile_from_zip(
         EXPORTING
-          i_tla           = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-tla
-          i_transport     = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
-          i_operation     = 'uninstall'
-          i_version       = i_target_version
+          i_tla                   = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-tla
+          i_transport             = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
+          i_operation             = 'uninstall'
+          i_version               = i_target_version
+          i_zipfile_absolute_path = mt_abapsdk_zipfiles[ op = 'uninstall' version = i_target_version ]-path
         IMPORTING
-          e_datafile_name = DATA(l_uninstall_datafile_name)
-          e_datafile_blob = DATA(l_uninstall_datafile_blob) ).
+          e_datafile_name         = DATA(l_uninstall_datafile_name)
+          e_datafile_blob         = DATA(l_uninstall_datafile_blob) ).
 
 
-      tms_manager->write_transport_trdir(
+      transport_manager->write_sdk_transport_trdir(
         EXPORTING
           i_cofile_name   = l_uninstall_cofile_name
           i_datafile_name = l_uninstall_datafile_name
@@ -2246,7 +2339,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
 
     ENDLOOP.
 
-    CALL METHOD import_abapsdk_transports
+    CALL METHOD transport_manager->import_sdk_transports
       EXPORTING
         it_transport_names = lt_transport_list_uninst
       IMPORTING
@@ -2260,53 +2353,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD submit_batch_job.
 
-    DATA(lt_modules_to_be_installed) = i_modules_to_be_installed.
-    DATA(lt_modules_to_be_deleted) = i_modules_to_be_deleted.
-    DATA(lv_target_version) = i_target_version.
-
-
-    " Export to shared memory and batch job submission need to go together
-    DELETE FROM SHARED BUFFER indx(mi) ID 'MOD_INST'.
-    EXPORT st_modules_to_be_installed = lt_modules_to_be_installed TO SHARED BUFFER indx(mi) ID 'MOD_INST'.
-    DELETE FROM SHARED BUFFER indx(md) ID 'MOD_DELE'.
-    EXPORT st_modules_to_be_deleted = lt_modules_to_be_deleted TO SHARED BUFFER indx(md) ID 'MOD_DELE'.
-    DELETE FROM SHARED BUFFER indx(tv) ID 'TAR_VERS'.
-    EXPORT s_target_version = lv_target_version TO SHARED BUFFER indx(tv) ID 'TAR_VERS'.
-
-
-    DATA(lo_job) = NEW cl_bp_abap_job( ).
-    lo_job->set_name( CONV char32( sy-repid ) ).
-    lo_job->set_report( sy-repid ).
-    lo_job->if_bp_job_engine~generate_job_count(
-      EXCEPTIONS
-        cant_create_job  = 1
-        invalid_job_data = 2
-        jobname_missing  = 3 ).
-    IF sy-subrc = 0.
-      lo_job->if_bp_job_engine~plan_job_step(
-        EXCEPTIONS
-          bad_priparams           = 11
-          bad_xpgflags            = 12
-          invalid_jobdata         = 13
-          jobname_missing         = 14
-          job_notex               = 15
-          job_submit_failed       = 16
-          program_missing         = 17
-          prog_abap_and_extpg_set = 18 ).
-    ENDIF.
-    IF sy-subrc = 0.
-      lo_job->if_bp_job_engine~start_immediately( EXCEPTIONS cant_start_immediate = 21 invalid_startdate = 22 jobname_missing = 23 job_close_failed = 24 job_nosteps = 25 job_notex = 26 ).
-    ENDIF.
-
-    IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Failed to submit job { sy-repid }: subrc = { sy-subrc }| ##NO_TEXT.
-    ENDIF.
-
-    r_result = lo_job->jobcount.
-
-  ENDMETHOD.
 
 
   METHOD run_background.
@@ -2420,33 +2467,35 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
     ).
 
     LOOP AT st_modules_to_be_installed ASSIGNING FIELD-SYMBOL(<fs_module_to_be_installed>).
-      get_abapsdk_transport_cofile(
+      transport_manager->get_sdk_cofile_from_zip(
         EXPORTING
-          i_tla         = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla
-          i_transport   = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
-          i_operation   = 'install'
-          i_version     = s_target_version
+          i_tla                   = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla
+          i_transport             = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
+          i_operation             = 'install'
+          i_version               = s_target_version
+          i_zipfile_absolute_path = mt_abapsdk_zipfiles[ op = 'install' version = s_target_version ]-path
         IMPORTING
-          e_cofile_name = DATA(l_cofile_name)
-          e_cofile_blob = DATA(l_cofile_blob) ).
+          e_cofile_name           = DATA(l_cofile_name)
+          e_cofile_blob           = DATA(l_cofile_blob) ).
 
       WRITE / |Downloaded cofile | && lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport &&
                | for TLA | && lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla ##NO_TEXT.
 
-      get_abapsdk_transport_datafile(
+      transport_manager->get_sdk_datafile_from_zip(
         EXPORTING
-          i_tla           = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla
-          i_transport     = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
-          i_operation     = 'install'
-          i_version       = s_target_version
+          i_tla                   = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla
+          i_transport             = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
+          i_operation             = 'install'
+          i_version               = s_target_version
+          i_zipfile_absolute_path = mt_abapsdk_zipfiles[ op = 'install' version = s_target_version ]-path
         IMPORTING
-          e_datafile_name = DATA(l_datafile_name)
-          e_datafile_blob = DATA(l_datafile_blob) ).
+          e_datafile_name         = DATA(l_datafile_name)
+          e_datafile_blob         = DATA(l_datafile_blob) ).
 
       WRITE / |Downloaded data file | && lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport &&
                | for TLA | && lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla ##NO_TEXT.
 
-      tms_manager->write_transport_trdir(
+      transport_manager->write_sdk_transport_trdir(
         EXPORTING
           i_cofile_name   = l_cofile_name
           i_datafile_name = l_datafile_name
@@ -2463,7 +2512,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
     ENDLOOP.
 
 
-    CALL METHOD import_abapsdk_transports
+    CALL METHOD transport_manager->import_sdk_transports
       EXPORTING
         it_transport_names = lt_transport_list_inst
       IMPORTING
@@ -2484,29 +2533,31 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
     LOOP AT st_modules_to_be_deleted ASSIGNING FIELD-SYMBOL(<fs_module_to_be_deleted>).
 
 
-      get_abapsdk_transport_cofile(
+      transport_manager->get_sdk_cofile_from_zip(
         EXPORTING
-          i_tla         = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-tla
-          i_transport   = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
-          i_operation   = 'uninstall'
-          i_version     = s_target_version
+          i_tla                   = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-tla
+          i_transport             = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
+          i_operation             = 'uninstall'
+          i_version               = s_target_version
+          i_zipfile_absolute_path = mt_abapsdk_zipfiles[ op = 'uninstall' version = s_target_version ]-path
         IMPORTING
-          e_cofile_name = DATA(l_uninstall_cofile_name)
-          e_cofile_blob = DATA(l_uninstall_cofile_blob) ).
+          e_cofile_name           = DATA(l_uninstall_cofile_name)
+          e_cofile_blob           = DATA(l_uninstall_cofile_blob) ).
 
 
-      get_abapsdk_transport_datafile(
+      transport_manager->get_sdk_datafile_from_zip(
         EXPORTING
-          i_tla           = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-tla
-          i_transport     = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
-          i_operation     = 'uninstall'
-          i_version       = s_target_version
+          i_tla                   = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-tla
+          i_transport             = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
+          i_operation             = 'uninstall'
+          i_version               = s_target_version
+          i_zipfile_absolute_path = mt_abapsdk_zipfiles[ op = 'uninstall' version = s_target_version ]-path
         IMPORTING
-          e_datafile_name = DATA(l_uninstall_datafile_name)
-          e_datafile_blob = DATA(l_uninstall_datafile_blob) ).
+          e_datafile_name         = DATA(l_uninstall_datafile_name)
+          e_datafile_blob         = DATA(l_uninstall_datafile_blob) ).
 
 
-      tms_manager->write_transport_trdir(
+      transport_manager->write_sdk_transport_trdir(
         EXPORTING
           i_cofile_name   = l_uninstall_cofile_name
           i_datafile_name = l_uninstall_datafile_name
@@ -2520,7 +2571,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
     ENDLOOP.
 
 
-    CALL METHOD import_abapsdk_transports
+    CALL METHOD transport_manager->import_sdk_transports
       EXPORTING
         it_transport_names = lt_transport_list_uninst
       IMPORTING
@@ -2678,7 +2729,6 @@ CLASS lcl_ui_tree_controller DEFINITION FINAL FRIENDS lcl_sdk_package_manager.
 
     METHODS:
       constructor IMPORTING ir_sdk_package_manager    TYPE REF TO lcl_sdk_package_manager
-                            i_sdk_certificate_manager TYPE REF TO lif_sdk_certificate_manager OPTIONAL
                   RAISING   lcx_error,
       get_modules_to_be_installed IMPORTING i_target_version                  TYPE string
                                   RETURNING VALUE(rt_modules_to_be_installed) TYPE tt_abapsdk_tla,
@@ -2754,7 +2804,6 @@ CLASS lcl_ui_tree_controller DEFINITION FINAL FRIENDS lcl_sdk_package_manager.
 
   PROTECTED SECTION.
   PRIVATE SECTION.
-    DATA: certificate_manager TYPE REF TO lif_sdk_certificate_manager.
 
 ENDCLASS.
 
@@ -2770,11 +2819,6 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
       mr_sdk_package_manager = NEW lcl_sdk_package_manager( ).
     ENDIF.
 
-    IF i_sdk_certificate_manager IS BOUND.
-      certificate_manager = i_sdk_certificate_manager.
-    ELSE.
-      certificate_manager = NEW lcl_sdk_certificate_manager( ).
-    ENDIF.
 
     mt_installed_modules = mr_sdk_package_manager->get_abapsdk_installed_modules( ).
 
@@ -3133,7 +3177,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
     ENDIF.
 
 
-    IF mr_sdk_package_manager->is_job_running( ).
+    IF mr_sdk_package_manager->job_manager->is_job_running( ).
       lr_item->set_editable( abap_false ).
     ENDIF.
 
@@ -3278,7 +3322,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
 
 
-        IF mr_sdk_package_manager->is_job_running( ).
+        IF mr_sdk_package_manager->job_manager->is_job_running( ).
           lr_item->set_editable( abap_false ).
         ELSE.
           lr_item->set_editable( abap_true ).
@@ -3479,7 +3523,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
       ENDIF.
 
 
-      IF mr_sdk_package_manager->is_job_running( ).
+      IF mr_sdk_package_manager->job_manager->is_job_running( ).
         lr_item->set_editable( abap_false ).
       ENDIF.
 
@@ -3503,11 +3547,11 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
 
     " Job already running?
-    IF mr_sdk_package_manager->is_job_running( ).
+    IF mr_sdk_package_manager->job_manager->is_job_running( ).
 
       " get job number
       DATA: lt_joblist TYPE tbtcjob_tt.
-      lt_joblist = mr_sdk_package_manager->get_running_jobs( i_jobname = sy-repid ).
+      lt_joblist = mr_sdk_package_manager->job_manager->get_running_jobs( i_jobname = sy-repid ).
       DATA wa_job TYPE tbtcjob.
       READ TABLE lt_joblist INTO wa_job INDEX 1.
       IF sy-subrc <> 0.
@@ -3570,7 +3614,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
                                                                                           i_version   = 'LATEST' ).
 
 
-    IF NOT mr_sdk_package_manager->is_job_running( ).
+    IF NOT mr_sdk_package_manager->job_manager->is_job_running( ).
       CLEAR: mt_modules_to_be_installed.
       CLEAR: mt_modules_to_be_deleted.
     ENDIF.
@@ -3582,7 +3626,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
     MESSAGE |Refresh complete.| TYPE 'S' ##NO_TEXT.
 
-    IF mr_sdk_package_manager->is_job_running( ).
+    IF mr_sdk_package_manager->job_manager->is_job_running( ).
       display_job_details_statusbar( ).
     ENDIF.
 
@@ -3608,7 +3652,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
         lr_functions = mr_tree->get_functions( ).
 
         " If a job is running we deactivate all buttons that could interfere with the running op
-        IF mr_sdk_package_manager->is_job_running( ) = abap_true.
+        IF mr_sdk_package_manager->job_manager->is_job_running( ) = abap_true.
           lr_functions->enable_function( name    = 'EXE_FGND'
                                          boolean = ' ' ).
           lr_functions->enable_function( name    = 'EXE_BGND'
@@ -3721,11 +3765,11 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
   METHOD display_job_details_statusbar.
 
     " Job already running?
-    IF mr_sdk_package_manager->is_job_running( ).
+    IF mr_sdk_package_manager->job_manager->is_job_running( ).
 
       " get job number
       DATA: lt_joblist TYPE tbtcjob_tt.
-      lt_joblist = mr_sdk_package_manager->get_running_jobs( i_jobname = sy-repid ).
+      lt_joblist = mr_sdk_package_manager->job_manager->get_running_jobs( i_jobname = sy-repid ).
       DATA wa_job TYPE tbtcjob.
       READ TABLE lt_joblist INTO wa_job INDEX 1.
       IF sy-subrc <> 0.
@@ -3744,11 +3788,11 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
   METHOD display_job_details.
 
     " Job already running?
-    IF mr_sdk_package_manager->is_job_running( ).
+    IF mr_sdk_package_manager->job_manager->is_job_running( ).
 
       " get job number
       DATA: lt_joblist TYPE tbtcjob_tt.
-      lt_joblist = mr_sdk_package_manager->get_running_jobs( i_jobname = sy-repid ).
+      lt_joblist = mr_sdk_package_manager->job_manager->get_running_jobs( i_jobname = sy-repid ).
       DATA wa_job TYPE tbtcjob.
       READ TABLE lt_joblist INTO wa_job INDEX 1.
       IF sy-subrc <> 0.
@@ -4637,7 +4681,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
 
 
-            l_jobnumber = mr_sdk_package_manager->submit_batch_job( i_modules_to_be_installed = mt_modules_to_be_installed
+            l_jobnumber = mr_sdk_package_manager->job_manager->submit_batch_job( i_modules_to_be_installed = mt_modules_to_be_installed
                                                                     i_modules_to_be_deleted   = mt_modules_to_be_deleted
                                                                     i_target_version          = lv_target_version ).
 
@@ -4720,7 +4764,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
             ENDIF.
 
-            l_jobnumber = mr_sdk_package_manager->submit_batch_job( i_modules_to_be_installed = mt_modules_to_be_installed
+            l_jobnumber = mr_sdk_package_manager->job_manager->submit_batch_job( i_modules_to_be_installed = mt_modules_to_be_installed
                                                                     i_modules_to_be_deleted   = mt_modules_to_be_deleted
                                                                     i_target_version          = lv_target_version ). " empty since modules tbd are not collected here
 
@@ -4804,7 +4848,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
             ENDIF.
 
-            l_jobnumber = mr_sdk_package_manager->submit_batch_job( i_modules_to_be_installed = mt_modules_to_be_installed " empty since modules tbi are not collected here
+            l_jobnumber = mr_sdk_package_manager->job_manager->submit_batch_job( i_modules_to_be_installed = mt_modules_to_be_installed " empty since modules tbi are not collected here
                                                                     i_modules_to_be_deleted   = mt_modules_to_be_deleted
                                                                     i_target_version          = lv_target_version ).
 
@@ -4831,7 +4875,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
           WHEN 'DOW_CERT'.
 
-            certificate_manager->install_amazon_root_certs( ).
+            mr_sdk_package_manager->certificate_manager->lif_sdk_certificate_manager~install_amazon_root_certs( ).
 
           WHEN 'DOW_TRAK'.
 
