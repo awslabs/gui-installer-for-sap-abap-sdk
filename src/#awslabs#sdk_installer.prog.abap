@@ -1491,7 +1491,7 @@ ENDCLASS.
 
 
 
-CLASS lcl_sdk_package_manager DEFINITION FINAL FRIENDS lcl_ui_tree_controller.
+CLASS lcl_sdk_package_manager DEFINITION FINAL.
 
   PUBLIC SECTION.
 
@@ -1499,6 +1499,12 @@ CLASS lcl_sdk_package_manager DEFINITION FINAL FRIENDS lcl_ui_tree_controller.
       mt_sdk_zipfiles             TYPE tt_sdk_zip,
       mt_available_modules_inst   TYPE tt_sdk_module,   " available modules for installation  (i.e. install transports)
       mt_available_modules_uninst TYPE tt_sdk_module.   " available modules for uninstallation (i.e. uninstall transports)
+
+    DATA: internet_manager TYPE REF TO lif_sdk_internet_manager READ-ONLY.
+    DATA: certificate_manager TYPE REF TO lcl_sdk_certificate_manager  READ-ONLY. " TODO: Fix class so the interface can be used instead
+    DATA: file_manager TYPE REF TO lcl_sdk_file_manager  READ-ONLY. " TODO: Fix class so the interface can be used instead
+    DATA: transport_manager TYPE REF TO lif_sdk_transport_manager  READ-ONLY.
+    DATA: job_manager TYPE REF TO lif_sdk_job_manager  READ-ONLY.
 
 
     METHODS:
@@ -1554,11 +1560,6 @@ CLASS lcl_sdk_package_manager DEFINITION FINAL FRIENDS lcl_ui_tree_controller.
 
   PRIVATE SECTION.
 
-    DATA: internet_manager TYPE REF TO lif_sdk_internet_manager.
-    DATA: certificate_manager TYPE REF TO lcl_sdk_certificate_manager. " TODO: Fix class so the interface can be used instead
-    DATA: file_manager TYPE REF TO lcl_sdk_file_manager. " TODO: Fix class so the interface can be used instead
-    DATA: transport_manager TYPE REF TO lif_sdk_transport_manager.
-    DATA: job_manager TYPE REF TO lif_sdk_job_manager.
 
 ENDCLASS.
 
@@ -2686,7 +2687,7 @@ ENDCLASS.
 
 
 
-CLASS lcl_ui_tree_controller DEFINITION FINAL FRIENDS lcl_sdk_package_manager.
+CLASS lcl_ui_tree_controller DEFINITION FINAL.
   PUBLIC SECTION.
 
     CONSTANTS: c_operation_none              TYPE i VALUE 0,
