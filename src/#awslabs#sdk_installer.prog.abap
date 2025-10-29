@@ -24,6 +24,7 @@
 
 REPORT /awslabs/sdk_installer.
 
+INTERFACE lif_sdk_constants DEFERRED.
 INTERFACE lif_sdk_internet_manager DEFERRED.
 INTERFACE lif_sdk_report_update_manager DEFERRED.
 INTERFACE lif_sdk_certificate_manager DEFERRED.
@@ -31,7 +32,10 @@ INTERFACE lif_sdk_file_manager DEFERRED.
 INTERFACE lif_sdk_transport_manager DEFERRED.
 INTERFACE lif_sdk_job_manager DEFERRED.
 
+INTERFACE lif_ui_constants DEFERRED.
 
+CLASS lcl_sdk_zipfile DEFINITION DEFERRED.
+CLASS lcl_sdk_zipfile_collection DEFINITION DEFERRED.
 CLASS lcl_sdk_internet_manager DEFINITION DEFERRED.
 CLASS lcl_sdk_report_update_manager DEFINITION DEFERRED.
 CLASS lcl_sdk_certificate_manager DEFINITION DEFERRED.
@@ -39,11 +43,35 @@ CLASS lcl_sdk_file_manager DEFINITION DEFERRED.
 CLASS lcl_sdk_transport_manager DEFINITION DEFERRED.
 CLASS lcl_sdk_job_manager DEFINITION DEFERRED.
 CLASS lcl_sdk_package_manager DEFINITION DEFERRED.
+
 CLASS lcl_ui_tree_controller DEFINITION DEFERRED.
+
 CLASS lcl_utils DEFINITION DEFERRED.
 CLASS lcx_error DEFINITION DEFERRED.
 CLASS lcl_main DEFINITION DEFERRED.
 
+
+INTERFACE lif_sdk_constants.
+  CONSTANTS:
+    c_trans_logical_path      TYPE filepath-pathintern VALUE 'ASSEMBLY' ##NO_TEXT,
+    c_logsubdir_name          TYPE fileintern VALUE 'BC_RSTEXTA3' ##NO_TEXT,
+    c_download_uri_prefix     TYPE string VALUE '://sdk-for-sapabap.aws.amazon.com/awsSdkSapabapV' ##NO_TEXT,
+    c_sdk_inst_file_prefix    TYPE string VALUE 'abapsdk-' ##NO_TEXT,
+    c_sdk_uninst_file_prefix  TYPE string VALUE 'uninstall-abapsdk-' ##NO_TEXT,
+    c_sdk_index_json_zip_path TYPE string VALUE 'META-INF/sdk_index.json' ##NO_TEXT,
+    c_transports_zip_path     TYPE string VALUE 'transports/' ##NO_TEXT,
+    c_url_internet_check      TYPE w3_url VALUE 'http://ocsp.r2m02.amazontrust.com' ##NO_TEXT,
+    c_url_github_raw          TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/%23awslabs%23sdk_installer.prog.abap'  ##NO_TEXT.
+ENDINTERFACE.
+
+INTERFACE lif_ui_constants.
+  CONSTANTS: c_operation_none              TYPE i VALUE 0,
+             c_operation_install           TYPE i VALUE 1,
+             c_operation_delete            TYPE i VALUE 2,
+             c_operation_update            TYPE i VALUE 3,
+             c_batch_rec_threshold         TYPE i VALUE 5,
+             c_sapgui_autologout_threshold TYPE i VALUE 900.
+ENDINTERFACE.
 
 
 
@@ -69,18 +97,6 @@ TYPES: BEGIN OF ts_sdk_module,
 " https://community.sap.com/t5/application-development-discussions/the-type-of-returning-parameter-must-be-fully-specified/td-p/1731970
 TYPES: tt_sdk_module TYPE STANDARD TABLE OF ts_sdk_module WITH KEY tla.
 
-TYPES tt_docs TYPE STANDARD TABLE OF docs.
-
-TYPES: BEGIN OF ts_sdk_zip,
-         op       TYPE string,
-         version  TYPE string,
-         uri      TYPE w3_url,
-         path     TYPE string,
-         json_web TYPE w3_url,
-       END OF ts_sdk_zip.
-
-TYPES tt_sdk_zip TYPE STANDARD TABLE OF ts_sdk_zip WITH KEY op version.
-
 TYPES: BEGIN OF ts_sdk_tla,
          tla     TYPE c LENGTH 4,
          version TYPE string,
@@ -89,8 +105,7 @@ TYPES: BEGIN OF ts_sdk_tla,
 TYPES tt_sdk_tla TYPE SORTED TABLE OF ts_sdk_tla WITH UNIQUE KEY tla.
 
 
-CLASS lcx_error DEFINITION
-                        INHERITING FROM cx_static_check.
+CLASS lcx_error DEFINITION INHERITING FROM cx_static_check.
   PUBLIC SECTION.
     DATA av_msg TYPE string.
     DATA av_typ TYPE syst_msgty.
@@ -119,7 +134,6 @@ CLASS lcx_error IMPLEMENTATION.
 
 ENDCLASS.
 
-
 CLASS lcl_utils DEFINITION FINAL.
 
   PUBLIC SECTION.
@@ -138,7 +152,9 @@ CLASS lcl_utils DEFINITION FINAL.
       binary_to_xstring IMPORTING it_bintab         TYPE table
                                   iv_length         TYPE i
                         RETURNING VALUE(ov_xstring) TYPE xstring
-                        RAISING   lcx_error.
+                        RAISING   lcx_error,
+      raise_lpath_exception IMPORTING i_filename TYPE string
+                            RAISING   lcx_error.
 ENDCLASS.
 
 
@@ -256,13 +272,19 @@ CLASS lcl_utils IMPLEMENTATION.
     rv_value = lv_value.
   ENDMETHOD.
 
+  METHOD raise_lpath_exception.
+    RAISE EXCEPTION TYPE lcx_error
+      EXPORTING
+        iv_msg = |Could not determine location to save { i_filename }. | &&
+                 |Please maintain logical path { lif_sdk_constants=>c_trans_logical_path } in transaction FILE | &&
+                 |to point to physical path <P=DIR_TRANS>/<PARAM_1>/<FILENAME>| ##NO_TEXT.
+  ENDMETHOD.
+
 ENDCLASS.
 
 
 
 INTERFACE lif_sdk_internet_manager.
-
-  CONSTANTS: c_url_internet_check TYPE w3_url VALUE 'http://ocsp.r2m02.amazontrust.com'.
 
   METHODS:
     download IMPORTING i_absolute_uri         TYPE w3_url
@@ -361,7 +383,7 @@ CLASS lcl_sdk_internet_manager IMPLEMENTATION.
 
     result = abap_false.
 
-    url = lif_sdk_internet_manager~c_url_internet_check.
+    url = lif_sdk_constants=>c_url_internet_check.
 
     TRY.
         cl_http_client=>create_by_url( EXPORTING url = url IMPORTING client = http_client ).
@@ -392,8 +414,6 @@ ENDCLASS.
 
 
 INTERFACE lif_sdk_report_update_manager.
-
-  CONSTANTS: c_url_github_raw TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/%23awslabs%23sdk_installer.prog.abap'.
 
   METHODS:
     is_update_available RETURNING VALUE(r_result) TYPE boolean
@@ -453,7 +473,7 @@ CLASS lcl_sdk_report_update_manager IMPLEMENTATION.
 
     " retrieve current version from github, store it in private instance variable
     TRY.
-        report_github_cached = download_report( i_url_github_raw = lif_sdk_report_update_manager~c_url_github_raw ).
+        report_github_cached = download_report( i_url_github_raw = lif_sdk_constants=>c_url_github_raw ).
       CATCH lcx_error INTO DATA(ex1).
         RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = ex1->get_text( ).
     ENDTRY.
@@ -522,7 +542,8 @@ INTERFACE lif_sdk_certificate_manager.
 
   METHODS:
 
-    install_amazon_root_certs RETURNING VALUE(r_success) TYPE abap_bool RAISING lcx_error.
+    install_amazon_root_certs IMPORTING i_internet_manager TYPE REF TO lif_sdk_internet_manager
+                        RETURNING VALUE(r_success) TYPE abap_bool RAISING lcx_error.
 
 ENDINTERFACE.
 
@@ -534,19 +555,19 @@ CLASS lcl_sdk_certificate_manager DEFINITION FINAL.
       lif_sdk_certificate_manager.
 
     METHODS:
-      constructor IMPORTING i_sdk_internet_manager TYPE REF TO lif_sdk_internet_manager OPTIONAL,
-      set_amazon_root_cert_values,
-      set_amazon_root_cert_status RAISING lcx_error,
-      setup_certificates RETURNING VALUE(r_result) TYPE abap_bool RAISING lcx_error.
+      constructor IMPORTING i_internet_manager TYPE REF TO lif_sdk_internet_manager OPTIONAL RAISING lcx_error.
+
 
   PRIVATE SECTION.
-    DATA: internet_manager TYPE REF TO lif_sdk_internet_manager.
+    DATA: internet_manager TYPE REF TO lif_sdk_internet_manager.    "TODO: REMOVE at some point
     DATA: mt_amazon_root_certs TYPE lif_sdk_certificate_manager~tt_amazon_root_certificate. " populated in set_amazon_root_cert_values
 
     METHODS:
-      check_bapiret
-        IMPORTING it_bapiret2 TYPE bapiret2_t
-        RAISING   lcx_error.
+      set_amazon_root_cert_values,
+      set_amazon_root_cert_status RAISING lcx_error,
+      retrieve_missing_certificates RETURNING VALUE(r_result) TYPE abap_bool RAISING lcx_error,
+      check_bapiret IMPORTING it_bapiret2 TYPE bapiret2_t
+                    RAISING   lcx_error.
 
 ENDCLASS.
 
@@ -555,34 +576,27 @@ CLASS lcl_sdk_certificate_manager IMPLEMENTATION.
 
   METHOD constructor.
 
-    IF i_sdk_internet_manager IS BOUND.
-      internet_manager = i_sdk_internet_manager.
+    IF i_internet_manager IS BOUND.
+      internet_manager = i_internet_manager.
     ELSE.
       internet_manager = NEW lcl_sdk_internet_manager( ).
     ENDIF.
 
-  ENDMETHOD.
+    set_amazon_root_cert_values( ). " Sets certificate URLs in member table
 
-  METHOD check_bapiret.
-    LOOP AT it_bapiret2 ASSIGNING FIELD-SYMBOL(<bapiret>) WHERE type CA 'AE'.
-      IF <bapiret>-message IS NOT INITIAL.
-        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not put certificate: { <bapiret>-message }| ##NO_TEXT.
-      ELSE.
-        DATA lv_msg TYPE string.
-        MESSAGE ID <bapiret>-id TYPE <bapiret>-type NUMBER <bapiret>-number
-          WITH <bapiret>-message_v1 <bapiret>-message_v2 <bapiret>-message_v3 <bapiret>-message_v4
-          INTO lv_msg.
-        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not put certificate: { lv_msg }| ##NO_TEXT.
-      ENDIF.
-    ENDLOOP.
+    set_amazon_root_cert_status( ). " Sets the certificates' status to installed/not installed
+
+    retrieve_missing_certificates( ).
+
   ENDMETHOD.
 
 
-  METHOD setup_certificates.
+
+  METHOD retrieve_missing_certificates.
 
     DATA lt_missing_certs TYPE lif_sdk_certificate_manager~tt_amazon_root_certificate.
     LOOP AT mt_amazon_root_certs INTO DATA(wa_amazon_root_cert).
-      IF wa_amazon_root_cert-installed = abap_false AND sy-tabix > 4.
+      IF wa_amazon_root_cert-installed = abap_false AND sy-tabix > 4. " Certs that are mentioned in the ABAP SDK docs appear after tabix 4
         APPEND wa_amazon_root_cert TO lt_missing_certs.
       ENDIF.
     ENDLOOP.
@@ -623,7 +637,7 @@ CLASS lcl_sdk_certificate_manager IMPLEMENTATION.
       ENDIF.
 
       IF lv_answer = 1.
-        lif_sdk_certificate_manager~install_amazon_root_certs( ).
+        lif_sdk_certificate_manager~install_amazon_root_certs( i_internet_manager = internet_manager ).
       ELSE.
         LEAVE PROGRAM.
       ENDIF.
@@ -814,19 +828,25 @@ CLASS lcl_sdk_certificate_manager IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD check_bapiret.
+    LOOP AT it_bapiret2 ASSIGNING FIELD-SYMBOL(<bapiret>) WHERE type CA 'AE'.
+      IF <bapiret>-message IS NOT INITIAL.
+        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not put certificate: { <bapiret>-message }| ##NO_TEXT.
+      ELSE.
+        DATA lv_msg TYPE string.
+        MESSAGE ID <bapiret>-id TYPE <bapiret>-type NUMBER <bapiret>-number
+          WITH <bapiret>-message_v1 <bapiret>-message_v2 <bapiret>-message_v3 <bapiret>-message_v4
+          INTO lv_msg.
+        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not put certificate: { lv_msg }| ##NO_TEXT.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+
 ENDCLASS.
 
 
 INTERFACE lif_sdk_file_manager.
-
-  CONSTANTS:
-    c_trans_logical_path      TYPE filepath-pathintern VALUE 'ASSEMBLY' ##NO_TEXT,
-    c_logsubdir_name          TYPE fileintern VALUE 'BC_RSTEXTA3' ##NO_TEXT,
-    c_download_uri_prefix     TYPE string VALUE '://sdk-for-sapabap.aws.amazon.com/awsSdkSapabapV' ##NO_TEXT,
-    c_sdk_inst_file_prefix    TYPE string VALUE 'sdk-' ##NO_TEXT,
-    c_sdk_uninst_file_prefix  TYPE string VALUE 'uninstall-sdk-' ##NO_TEXT,
-    c_sdk_index_json_zip_path TYPE string VALUE 'META-INF/sdk_index.json' ##NO_TEXT,
-    c_transports_zip_path     TYPE string VALUE 'transports/' ##NO_TEXT.
 
 
 ENDINTERFACE.
@@ -838,23 +858,6 @@ CLASS lcl_sdk_file_manager DEFINITION FINAL.
       lif_sdk_file_manager.
 
     METHODS:
-      build_download_uri_prefix IMPORTING i_protocol      TYPE string DEFAULT 'https'
-                                          i_major_version TYPE string DEFAULT '1'
-                                          i_branch        TYPE string DEFAULT 'release'
-                                RETURNING VALUE(r_result) TYPE string,
-      build_zipfile_name IMPORTING i_operation     TYPE string
-                                   i_version       TYPE string DEFAULT 'LATEST'
-                         RETURNING VALUE(r_result) TYPE string,
-      build_jsonfile_name IMPORTING i_operation     TYPE string
-                                    i_version       TYPE string DEFAULT 'LATEST'
-                          RETURNING VALUE(r_result) TYPE string,
-      build_zipfile_path IMPORTING i_zipfile_name       TYPE string
-                                   i_trans_logical_path TYPE filepath-pathintern
-                         RETURNING VALUE(r_result)      TYPE string
-                         RAISING   lcx_error,
-      validate_zipfile_path IMPORTING i_zipfile_path   TYPE string
-                                      i_logsubdir_name TYPE fileintern
-                            RETURNING VALUE(r_result)  TYPE abap_bool,
       get_file_from_zip IMPORTING i_zipfile_absolute_path TYPE string
                                   i_file_to_retrieve      TYPE string
                         RETURNING VALUE(r_file_xstring)   TYPE xstring,
@@ -867,96 +870,13 @@ CLASS lcl_sdk_file_manager DEFINITION FINAL.
         RAISING   lcx_error,
       open_for_output
         IMPORTING iv_filename TYPE clike
-        RAISING   lcx_error,
-      raise_lpath_exception
-        IMPORTING iv_filename TYPE string
-        RAISING   lcx_error .
+        RAISING   lcx_error.
 
   PRIVATE SECTION.
 
 ENDCLASS.
 
 CLASS lcl_sdk_file_manager IMPLEMENTATION.
-
-  METHOD build_download_uri_prefix.
-
-    r_result = |{ i_protocol }{ lif_sdk_file_manager~c_download_uri_prefix }{ i_major_version }/{ i_branch }/| ##NO_TEXT..
-
-  ENDMETHOD.
-
-  METHOD build_zipfile_name.
-
-    CASE i_operation.
-      WHEN 'install'.
-        r_result = |{ lif_sdk_file_manager~c_sdk_inst_file_prefix }{ i_version }.zip| ##NO_TEXT..
-      WHEN 'uninstall'.
-        r_result = |{ lif_sdk_file_manager~c_sdk_uninst_file_prefix }{ i_version }.zip| ##NO_TEXT..
-      WHEN OTHERS.
-
-    ENDCASE.
-
-  ENDMETHOD.
-
-
-  METHOD build_jsonfile_name.
-
-    CASE i_operation.
-      WHEN 'install'.
-        r_result = |{ lif_sdk_file_manager~c_sdk_inst_file_prefix }{ i_version }.json| ##NO_TEXT..
-      WHEN 'uninstall'.
-        r_result = |{ lif_sdk_file_manager~c_sdk_uninst_file_prefix }{ i_version }.json| ##NO_TEXT..
-      WHEN OTHERS.
-
-    ENDCASE.
-
-  ENDMETHOD.
-
-
-  METHOD build_zipfile_path.
-
-    CALL FUNCTION 'FILE_GET_NAME_USING_PATH'
-      EXPORTING
-        client                     = sy-mandt
-        logical_path               = i_trans_logical_path
-        operating_system           = sy-opsys
-        parameter_1                = 'tmp'
-        file_name                  = i_zipfile_name
-      IMPORTING
-        file_name_with_path        = r_result
-      EXCEPTIONS
-        path_not_found             = 1
-        missing_parameter          = 2
-        operating_system_not_found = 3
-        file_system_not_found      = 4
-        OTHERS                     = 5.
-    IF sy-subrc <> 0.
-      raise_lpath_exception( i_zipfile_name ).
-    ENDIF.
-
-  ENDMETHOD.
-
-
-  METHOD validate_zipfile_path.
-
-    DATA(lv_zipfile_path) = i_zipfile_path.
-
-    CALL FUNCTION 'FILE_VALIDATE_NAME'
-      EXPORTING
-        logical_filename  = i_logsubdir_name
-        parameter_1       = 'tmp'
-      IMPORTING
-        validation_active = r_result
-      CHANGING
-        physical_filename = lv_zipfile_path
-      EXCEPTIONS
-        OTHERS            = 1.
-    IF sy-subrc <> 0.
-      MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
-        WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
-    ENDIF.
-
-  ENDMETHOD.
-
 
   METHOD get_file_from_zip.
     DATA lv_zipfile_content TYPE xstring.
@@ -1068,19 +988,6 @@ CLASS lcl_sdk_file_manager IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
-  METHOD raise_lpath_exception.
-    RAISE EXCEPTION TYPE lcx_error
-      EXPORTING
-        iv_msg = |Could not determine location to save { iv_filename }. | &&
-                 |Please maintain logical path { lif_sdk_file_manager~c_trans_logical_path } in transaction FILE | &&
-                 |to point to physical path <P=DIR_TRANS>/<PARAM_1>/<FILENAME>| ##NO_TEXT.
-
-  ENDMETHOD.
-
-
-
-
-
 ENDCLASS.
 
 
@@ -1153,7 +1060,7 @@ CLASS lcl_sdk_transport_manager IMPLEMENTATION.
     CALL FUNCTION 'FILE_GET_NAME_USING_PATH'
       EXPORTING
         client                     = sy-mandt
-        logical_path               = lif_sdk_file_manager=>c_trans_logical_path
+        logical_path               = lif_sdk_constants=>c_trans_logical_path
         operating_system           = sy-opsys
         parameter_1                = 'cofiles'
         file_name                  = i_cofile_name
@@ -1166,13 +1073,13 @@ CLASS lcl_sdk_transport_manager IMPLEMENTATION.
         file_system_not_found      = 4
         OTHERS                     = 5.
     IF sy-subrc <> 0.
-      file_manager->raise_lpath_exception( lv_filepath_cofile ).
+      lcl_utils=>raise_lpath_exception( i_cofile_name ).
     ENDIF.
 
 
     CALL FUNCTION 'FILE_VALIDATE_NAME'
       EXPORTING
-        logical_filename  = lif_sdk_file_manager=>c_logsubdir_name
+        logical_filename  = lif_sdk_constants=>c_logsubdir_name
         parameter_1       = 'cofiles'
       CHANGING
         physical_filename = lv_filepath_cofile
@@ -1188,7 +1095,7 @@ CLASS lcl_sdk_transport_manager IMPLEMENTATION.
     CALL FUNCTION 'FILE_GET_NAME_USING_PATH'
       EXPORTING
         client                     = sy-mandt
-        logical_path               = lif_sdk_file_manager=>c_trans_logical_path
+        logical_path               = lif_sdk_constants=>c_trans_logical_path
         operating_system           = sy-opsys
         parameter_1                = 'data'
         file_name                  = i_datafile_name
@@ -1201,12 +1108,12 @@ CLASS lcl_sdk_transport_manager IMPLEMENTATION.
         file_system_not_found      = 4
         OTHERS                     = 5.
     IF sy-subrc <> 0.
-      file_manager->raise_lpath_exception( i_datafile_name ).
+      lcl_utils=>raise_lpath_exception( i_datafile_name ).
     ENDIF.
 
     CALL FUNCTION 'FILE_VALIDATE_NAME'
       EXPORTING
-        logical_filename  = lif_sdk_file_manager=>c_logsubdir_name
+        logical_filename  = lif_sdk_constants=>c_logsubdir_name
         parameter_1       = 'data'
       CHANGING
         physical_filename = lv_filepath_datafile
@@ -1250,7 +1157,7 @@ CLASS lcl_sdk_transport_manager IMPLEMENTATION.
 
     e_cofile_name = 'K' && i_transport+4 && '.' && i_transport+0(3).
 
-    l_cofile_zip_path = lif_sdk_file_manager=>c_transports_zip_path && i_tla && '/' && e_cofile_name.
+    l_cofile_zip_path = lif_sdk_constants=>c_transports_zip_path && i_tla && '/' && e_cofile_name.
 
     e_cofile_blob = file_manager->get_file_from_zip( i_zipfile_absolute_path = i_zipfile_absolute_path
                                                      i_file_to_retrieve      = l_cofile_zip_path ).
@@ -1267,7 +1174,7 @@ CLASS lcl_sdk_transport_manager IMPLEMENTATION.
 
     e_datafile_name = 'R' && i_transport+4 && '.' && i_transport+0(3).
 
-    l_datafile_zip_path = lif_sdk_file_manager=>c_transports_zip_path && i_tla && '/' && e_datafile_name.
+    l_datafile_zip_path = lif_sdk_constants=>c_transports_zip_path && i_tla && '/' && e_datafile_name.
 
     e_datafile_blob = file_manager->get_file_from_zip( i_zipfile_absolute_path = i_zipfile_absolute_path
                                                        i_file_to_retrieve      = l_datafile_zip_path ).
@@ -1489,6 +1396,286 @@ CLASS lcl_sdk_job_manager IMPLEMENTATION.
 
 ENDCLASS.
 
+CLASS lcl_sdk_zipfile DEFINITION FINAL.
+
+  PUBLIC SECTION.
+
+    DATA:
+      op       TYPE string READ-ONLY,
+      version  TYPE string READ-ONLY,
+      name     TYPE string READ-ONLY,
+      uri      TYPE w3_url READ-ONLY,
+      path     TYPE string READ-ONLY,
+      json_web TYPE w3_url READ-ONLY.
+
+    METHODS:
+      constructor IMPORTING i_op       TYPE string
+                            i_version  TYPE string
+                            i_name     TYPE string OPTIONAL
+                            i_uri      TYPE w3_url OPTIONAL
+                            i_path     TYPE string OPTIONAL
+                            i_json_web TYPE w3_url OPTIONAL
+                  RAISING   lcx_error,
+      set_op IMPORTING i_op TYPE string,
+      set_version IMPORTING i_version TYPE string,
+      set_name IMPORTING i_name TYPE string,
+      set_uri IMPORTING i_uri TYPE w3_url,
+      set_path IMPORTING i_path TYPE string,
+      set_json_web IMPORTING i_json_web TYPE w3_url.
+
+  PRIVATE SECTION.
+    METHODS:
+      build_download_uri_prefix IMPORTING i_protocol      TYPE string DEFAULT 'https'
+                                          i_major_version TYPE string DEFAULT '1'
+                                          i_branch        TYPE string DEFAULT 'release'
+                                RETURNING VALUE(r_result) TYPE string,
+      build_zipfile_name IMPORTING i_operation     TYPE string
+                                   i_version       TYPE string DEFAULT 'LATEST'
+                         RETURNING VALUE(r_result) TYPE string,
+      build_jsonfile_name IMPORTING i_operation     TYPE string
+                                    i_version       TYPE string DEFAULT 'LATEST'
+                          RETURNING VALUE(r_result) TYPE string,
+      build_zipfile_path IMPORTING i_zipfile_name       TYPE string
+                                   i_trans_logical_path TYPE filepath-pathintern
+                         RETURNING VALUE(r_result)      TYPE string
+                         RAISING   lcx_error,
+      validate_zipfile_path IMPORTING i_zipfile_path   TYPE string
+                                      i_logsubdir_name TYPE fileintern
+                            RETURNING VALUE(r_result)  TYPE abap_bool.
+
+ENDCLASS.
+
+CLASS lcl_sdk_zipfile IMPLEMENTATION.
+
+  METHOD constructor.
+    op = i_op.
+    version = i_version.
+
+    IF i_name IS INITIAL.
+      name = |{ build_zipfile_name( i_operation = op i_version = version ) }|.
+    ELSE.
+      name = i_name.
+    ENDIF.
+
+    IF i_uri IS INITIAL.
+      uri = |{ build_download_uri_prefix( ) }{ name }|.
+    ELSE.
+      uri = i_uri.
+    ENDIF.
+
+    IF i_json_web IS INITIAL.
+      json_web = |{ build_download_uri_prefix( ) }{ build_jsonfile_name( i_operation = op i_version = version ) }|.
+    ELSE.
+      json_web = i_json_web.
+    ENDIF.
+
+    IF i_path IS INITIAL.
+      path = build_zipfile_path( i_zipfile_name = name i_trans_logical_path = lif_sdk_constants=>c_trans_logical_path ).
+    ELSE.
+      path = i_path.
+    ENDIF.
+
+    validate_zipfile_path( i_zipfile_path = path i_logsubdir_name = lif_sdk_constants=>c_logsubdir_name ).
+
+  ENDMETHOD.
+
+  METHOD set_op.
+    op = i_op.
+  ENDMETHOD.
+
+  METHOD set_version.
+    version = i_version.
+  ENDMETHOD.
+
+  METHOD set_name.
+    name = i_name.
+  ENDMETHOD.
+
+  METHOD set_uri.
+    uri = i_uri.
+  ENDMETHOD.
+
+  METHOD set_path.
+    path = i_path.
+  ENDMETHOD.
+
+  METHOD set_json_web.
+    json_web = i_json_web.
+  ENDMETHOD.
+
+
+  METHOD build_download_uri_prefix.
+
+    r_result = |{ i_protocol }{ lif_sdk_constants=>c_download_uri_prefix }{ i_major_version }/{ i_branch }/| ##NO_TEXT..
+
+  ENDMETHOD.
+
+  METHOD build_zipfile_name.
+
+    CASE i_operation.
+      WHEN 'install'.
+        r_result = |{ lif_sdk_constants=>c_sdk_inst_file_prefix }{ i_version }.zip| ##NO_TEXT..
+      WHEN 'uninstall'.
+        r_result = |{ lif_sdk_constants=>c_sdk_uninst_file_prefix }{ i_version }.zip| ##NO_TEXT..
+      WHEN OTHERS.
+
+    ENDCASE.
+
+  ENDMETHOD.
+
+
+  METHOD build_jsonfile_name.
+
+    CASE i_operation.
+      WHEN 'install'.
+        r_result = |{ lif_sdk_constants=>c_sdk_inst_file_prefix }{ i_version }.json| ##NO_TEXT..
+      WHEN 'uninstall'.
+        r_result = |{ lif_sdk_constants=>c_sdk_uninst_file_prefix }{ i_version }.json| ##NO_TEXT..
+      WHEN OTHERS.
+
+    ENDCASE.
+
+  ENDMETHOD.
+
+
+  METHOD build_zipfile_path.
+
+    CALL FUNCTION 'FILE_GET_NAME_USING_PATH'
+      EXPORTING
+        client                     = sy-mandt
+        logical_path               = i_trans_logical_path
+        operating_system           = sy-opsys
+        parameter_1                = 'tmp'
+        file_name                  = i_zipfile_name
+      IMPORTING
+        file_name_with_path        = r_result
+      EXCEPTIONS
+        path_not_found             = 1
+        missing_parameter          = 2
+        operating_system_not_found = 3
+        file_system_not_found      = 4
+        OTHERS                     = 5.
+    IF sy-subrc <> 0.
+      lcl_utils=>raise_lpath_exception( i_zipfile_name ).
+    ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD validate_zipfile_path.
+
+    DATA(lv_zipfile_path) = i_zipfile_path.
+
+    CALL FUNCTION 'FILE_VALIDATE_NAME'
+      EXPORTING
+        logical_filename  = i_logsubdir_name
+        parameter_1       = 'tmp'
+      IMPORTING
+        validation_active = r_result
+      CHANGING
+        physical_filename = lv_zipfile_path
+      EXCEPTIONS
+        OTHERS            = 1.
+    IF sy-subrc <> 0.
+      MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+        WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+    ENDIF.
+
+  ENDMETHOD.
+
+ENDCLASS.
+
+CLASS lcl_sdk_zipfile_collection DEFINITION FINAL.
+
+  PUBLIC SECTION.
+    TYPES tt_sdk_zipfile TYPE STANDARD TABLE OF REF TO lcl_sdk_zipfile.
+
+    METHODS:
+      constructor IMPORTING i_zipfiles TYPE tt_sdk_zipfile OPTIONAL RAISING lcx_error,
+      add IMPORTING i_zipfile TYPE REF TO lcl_sdk_zipfile
+          RAISING   lcx_error,
+      get_by_op_version IMPORTING i_op             TYPE string
+                                  i_version        TYPE string
+                        RETURNING VALUE(r_zipfile) TYPE REF TO lcl_sdk_zipfile,
+      exists IMPORTING i_op            TYPE string
+                       i_version       TYPE string
+             RETURNING VALUE(r_result) TYPE abap_bool,
+      update_zipfile_paths IMPORTING i_file_manager TYPE REF TO lcl_sdk_file_manager.
+
+
+  PRIVATE SECTION.
+    DATA: mt_sdk_zipfiles TYPE tt_sdk_zipfile.
+
+ENDCLASS.
+
+
+CLASS lcl_sdk_zipfile_collection IMPLEMENTATION.
+
+  METHOD constructor.
+    IF i_zipfiles IS NOT INITIAL.
+      LOOP AT i_zipfiles INTO DATA(wa_zipfile).
+        add( wa_zipfile ).
+      ENDLOOP.
+    ELSE.
+      add( NEW lcl_sdk_zipfile( i_op = 'install' i_version  = 'LATEST' ) ).
+      add( NEW lcl_sdk_zipfile( i_op = 'uninstall' i_version  = 'LATEST' ) ).
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD add.
+    IF i_zipfile IS NOT BOUND.
+      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Unbound zipfile reference.| ##NO_TEXT.
+    ENDIF.
+    APPEND i_zipfile TO mt_sdk_zipfiles.
+  ENDMETHOD.
+
+  METHOD exists.
+    IF get_by_op_version( i_op = i_op i_version = i_version ) IS BOUND.
+      r_result = abap_true.
+    ELSE.
+      r_result = abap_false.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD get_by_op_version.
+    LOOP AT mt_sdk_zipfiles INTO DATA(wa_zipfile).
+      IF wa_zipfile->op = i_op AND wa_zipfile->version = i_version.
+        r_zipfile = wa_zipfile.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
+    " returns unbound r_zipfile if no zipfile matches op and version
+  ENDMETHOD.
+
+  METHOD update_zipfile_paths.
+
+    DATA(zipfile_available) = abap_false.
+
+    LOOP AT mt_sdk_zipfiles INTO DATA(wa_zipfile).
+
+      zipfile_available = i_file_manager->check_file_exists_at( i_path = wa_zipfile->path ).
+
+      IF zipfile_available = abap_true.
+        CONTINUE.
+      ELSE.
+        wa_zipfile->set_path( i_path = '' ).
+      ENDIF.
+
+    ENDLOOP.
+  ENDMETHOD.
+
+ENDCLASS.
+
+TYPES: BEGIN OF ts_sdk_zip,
+         op       TYPE string,
+         version  TYPE string,
+         uri      TYPE w3_url,
+         path     TYPE string,
+         json_web TYPE w3_url,
+       END OF ts_sdk_zip.
+
+TYPES tt_sdk_zip TYPE STANDARD TABLE OF ts_sdk_zip WITH KEY op version.
+
 
 
 CLASS lcl_sdk_package_manager DEFINITION FINAL.
@@ -1496,12 +1683,11 @@ CLASS lcl_sdk_package_manager DEFINITION FINAL.
   PUBLIC SECTION.
 
     DATA:
-      mt_sdk_zipfiles             TYPE tt_sdk_zip,
       mt_available_modules_inst   TYPE tt_sdk_module,   " available modules for installation  (i.e. install transports)
       mt_available_modules_uninst TYPE tt_sdk_module.   " available modules for uninstallation (i.e. uninstall transports)
 
     DATA: internet_manager TYPE REF TO lif_sdk_internet_manager READ-ONLY.
-    DATA: certificate_manager TYPE REF TO lcl_sdk_certificate_manager  READ-ONLY. " TODO: Fix class so the interface can be used instead
+    DATA: certificate_manager TYPE REF TO lif_sdk_certificate_manager READ-ONLY.
     DATA: file_manager TYPE REF TO lcl_sdk_file_manager  READ-ONLY. " TODO: Fix class so the interface can be used instead
     DATA: transport_manager TYPE REF TO lif_sdk_transport_manager  READ-ONLY.
     DATA: job_manager TYPE REF TO lif_sdk_job_manager  READ-ONLY.
@@ -1510,20 +1696,20 @@ CLASS lcl_sdk_package_manager DEFINITION FINAL.
     METHODS:
       constructor IMPORTING i_batch_mode          TYPE syst-batch OPTIONAL
                             i_internet_manager    TYPE REF TO lif_sdk_internet_manager OPTIONAL
-                            i_certificate_manager TYPE REF TO lcl_sdk_certificate_manager OPTIONAL
+                            i_certificate_manager TYPE REF TO lif_sdk_certificate_manager OPTIONAL
                             i_file_manager        TYPE REF TO lcl_sdk_file_manager OPTIONAL
                             i_transport_manager   TYPE REF TO lif_sdk_transport_manager OPTIONAL
                             i_job_manager         TYPE REF TO lif_sdk_job_manager OPTIONAL
+                            i_sdk_zipfiles        TYPE REF TO lcl_sdk_zipfile_collection OPTIONAL
                   RAISING   lcx_error,
       install_all_modules IMPORTING it_modules_to_be_installed TYPE tt_sdk_tla
                                     it_modules_to_be_deleted   TYPE tt_sdk_tla
                           RETURNING VALUE(r_jobnumber)         TYPE btcjobcnt
                           RAISING   lcx_error,
-      download_sdk_zipfiles IMPORTING i_file_list      TYPE tt_sdk_zip
-                                      i_version        TYPE string DEFAULT 'LATEST'
-                            RETURNING VALUE(r_success) TYPE abap_bool
+      download_sdk_zipfile IMPORTING i_zipfile TYPE REF TO lcl_sdk_zipfile
+                           RAISING   lcx_error,
+      download_sdk_zipfiles IMPORTING i_version TYPE string DEFAULT 'LATEST'
                             RAISING   lcx_error,
-
       get_sdk_installed_modules RETURNING VALUE(r_installed_modules) TYPE tt_sdk_module
                                 RAISING   lcx_error,
       get_sdk_deprecated_mod_inst RETURNING VALUE(r_deprecated_modules) TYPE tt_sdk_module,
@@ -1551,15 +1737,14 @@ CLASS lcl_sdk_package_manager DEFINITION FINAL.
         RAISING   lcx_error,
       check_sdk_zipfiles_current
         RETURNING VALUE(r_result) TYPE abap_bool
-        RAISING   lcx_error,
-      update_sdk_zipfile_paths.
+        RAISING   lcx_error.
 
 
 
   PROTECTED SECTION.
 
   PRIVATE SECTION.
-
+    DATA: sdk_zipfiles TYPE REF TO lcl_sdk_zipfile_collection.
 
 ENDCLASS.
 
@@ -1588,7 +1773,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
     IF i_file_manager IS BOUND.
       file_manager = i_file_manager.
     ELSE.
-      file_manager =     file_manager = NEW lcl_sdk_file_manager( ).
+      file_manager = file_manager = NEW lcl_sdk_file_manager( ).
     ENDIF.
 
     IF i_transport_manager IS BOUND.
@@ -1603,50 +1788,11 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
       job_manager = NEW lcl_sdk_job_manager( ).
     ENDIF.
 
-
-    DATA wa_zipfile_inst TYPE ts_sdk_zip.
-    wa_zipfile_inst-op = 'install' ##NO_TEXT.
-    wa_zipfile_inst-version = 'LATEST'.
-
-    DATA(lv_zipfile_name_inst) = file_manager->build_zipfile_name( i_operation = wa_zipfile_inst-op i_version = 'LATEST' ).
-
-    wa_zipfile_inst-uri = |{ file_manager->build_download_uri_prefix( ) }{ lv_zipfile_name_inst }|.
-
-    wa_zipfile_inst-json_web = |{ file_manager->build_download_uri_prefix( ) }{ file_manager->build_jsonfile_name( i_operation = wa_zipfile_inst-op i_version = 'LATEST' ) }|.
-
-    wa_zipfile_inst-path = file_manager->build_zipfile_path( i_zipfile_name       = lv_zipfile_name_inst
-                                                             i_trans_logical_path = lif_sdk_file_manager=>c_trans_logical_path ).
-
-    file_manager->validate_zipfile_path( i_zipfile_path   = wa_zipfile_inst-path
-                                         i_logsubdir_name = lif_sdk_file_manager=>c_logsubdir_name ).
-
-    APPEND wa_zipfile_inst TO mt_sdk_zipfiles.
-
-
-
-
-    DATA wa_zipfile_uninst TYPE ts_sdk_zip.
-    wa_zipfile_uninst-op = 'uninstall' ##NO_TEXT.
-    wa_zipfile_uninst-version = 'LATEST'.
-
-    DATA(lv_zipfile_name_uninst) = file_manager->build_zipfile_name( i_operation = wa_zipfile_uninst-op i_version = 'LATEST' ).
-
-    wa_zipfile_uninst-uri = |{ file_manager->build_download_uri_prefix( ) }{ lv_zipfile_name_uninst }|.
-
-    wa_zipfile_uninst-json_web = |{ file_manager->build_download_uri_prefix( ) }{ file_manager->build_jsonfile_name( i_operation = wa_zipfile_uninst-op i_version = 'LATEST' ) }|.
-
-    wa_zipfile_uninst-path = file_manager->build_zipfile_path( i_zipfile_name       = lv_zipfile_name_uninst
-                                                               i_trans_logical_path = lif_sdk_file_manager=>c_trans_logical_path ).
-
-    file_manager->validate_zipfile_path( i_zipfile_path   = wa_zipfile_uninst-path
-                                         i_logsubdir_name = lif_sdk_file_manager=>c_logsubdir_name ).
-
-    APPEND wa_zipfile_uninst TO mt_sdk_zipfiles.
-
-
-    certificate_manager->set_amazon_root_cert_values( ).
-
-    certificate_manager->set_amazon_root_cert_status( ).
+    IF i_sdk_zipfiles IS BOUND.
+      sdk_zipfiles = i_sdk_zipfiles.
+    ELSE.
+      sdk_zipfiles = NEW lcl_sdk_zipfile_collection( ).
+    ENDIF.
 
     TRY.
         IF internet_manager->has_internet_access( ) = abap_false.
@@ -1655,8 +1801,6 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
       CATCH lcx_error INTO DATA(r_error).
         MESSAGE |This report requires HTTP(S) Internet access, please enable before usage.| TYPE 'A' ##NO_TEXT.
     ENDTRY.
-
-    certificate_manager->setup_certificates( ).
 
     mt_available_modules_inst = get_sdk_avail_modules_json( i_operation = 'install'
                                                             i_source    = 'web'
@@ -1928,14 +2072,14 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
     CASE i_source.
       WHEN 'web'.
 
-        DATA(l_jsonx) = internet_manager->download( i_absolute_uri = mt_sdk_zipfiles[ op = i_operation version = i_version ]-json_web
+        DATA(l_jsonx) = internet_manager->download( i_absolute_uri = sdk_zipfiles->get_by_op_version( i_op = i_operation i_version = i_version )->json_web
                                                     i_blankstocrlf = abap_false ).
 
 
       WHEN 'zip'.
 
-        l_jsonx = file_manager->get_file_from_zip( i_zipfile_absolute_path = mt_sdk_zipfiles[ op = i_operation version = i_version ]-path
-                                                   i_file_to_retrieve      = lif_sdk_file_manager=>c_sdk_index_json_zip_path ).
+        l_jsonx = file_manager->get_file_from_zip( i_zipfile_absolute_path = sdk_zipfiles->get_by_op_version( i_op = i_operation i_version = i_version )->path
+                                                   i_file_to_retrieve      = lif_sdk_constants=>c_sdk_index_json_zip_path ).
 
       WHEN 'others'.
 
@@ -2065,46 +2209,22 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
 
   ENDMETHOD.
 
-
-
-
-
-
-
-  METHOD update_sdk_zipfile_paths.
-
-    DATA(lv_exists) = abap_false.
-
-    LOOP AT mt_sdk_zipfiles INTO DATA(wa_sdk_zipfile).
-
-      lv_exists = file_manager->check_file_exists_at( i_path = wa_sdk_zipfile-path ).
-
-      IF lv_exists = abap_true.
-        CONTINUE.
-      ELSE.
-        wa_sdk_zipfile-path = ''.
-        MODIFY TABLE mt_sdk_zipfiles FROM wa_sdk_zipfile.
-      ENDIF.
-
-    ENDLOOP.
-  ENDMETHOD.
-
-
+  " TODO: Move to zipfile_collection
   METHOD check_sdk_zipfile_exists.
 
-    IF line_exists( mt_sdk_zipfiles[ op = i_operation version = i_version ] ).
-      r_result = file_manager->check_file_exists_at( mt_sdk_zipfiles[ op = i_operation version = i_version ]-path ).
+    IF sdk_zipfiles->exists( i_op = i_operation i_version = i_version ).
+      r_result = file_manager->check_file_exists_at( sdk_zipfiles->get_by_op_version( i_op = i_operation i_version = i_version )->path ).
     ELSE.
       r_result = abap_false.
     ENDIF.
 
   ENDMETHOD.
 
+  " TODO: Move to zipfile_collection
   METHOD check_sdk_zipfiles_present.
 
     DATA lv_result TYPE abap_bool.
     DATA lv_version TYPE string.
-    DATA lv_dl_result TYPE abap_bool.
     DATA: lt_sdk_zipfiles TYPE tt_sdk_zip.
     lv_result = abap_true.
     lv_version = i_version.
@@ -2112,73 +2232,14 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
     IF check_sdk_zipfile_exists( i_operation = 'install' i_version = lv_version ) = abap_false
         OR check_sdk_zipfile_exists( i_operation = 'uninstall' i_version = lv_version ) = abap_false.
 
+      MESSAGE |ABAP SDK zipfile for installation/uninstallation in version { lv_version } not present. Downloading them now.| TYPE 'I' ##NO_TEXT.
 
-      "--- install
-      DATA wa_zipfile_inst TYPE ts_sdk_zip.
-      wa_zipfile_inst-op = 'install' ##NO_TEXT.
-      wa_zipfile_inst-version = lv_version.
+      TRY.
+          download_sdk_zipfiles( i_version = lv_version ).
+        CATCH lcx_error.
+          MESSAGE 'One or more ABAP SDK zipfiles could not be successfully downloaded, aborting' TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
+      ENDTRY.
 
-      DATA(lv_zipfile_name_inst) = file_manager->build_zipfile_name( i_operation = wa_zipfile_inst-op i_version = lv_version ).
-
-      wa_zipfile_inst-uri = |{ file_manager->build_download_uri_prefix( ) }{ lv_zipfile_name_inst }|.
-
-      wa_zipfile_inst-json_web = |{ file_manager->build_download_uri_prefix( ) }{ file_manager->build_jsonfile_name( i_operation = wa_zipfile_inst-op i_version = lv_version ) }|.
-
-      wa_zipfile_inst-path = file_manager->build_zipfile_path( i_zipfile_name       = lv_zipfile_name_inst
-                                                               i_trans_logical_path = lif_sdk_file_manager=>c_trans_logical_path ).
-
-      file_manager->validate_zipfile_path( i_zipfile_path   = wa_zipfile_inst-path
-                                           i_logsubdir_name = lif_sdk_file_manager=>c_logsubdir_name ).
-
-      APPEND wa_zipfile_inst TO mt_sdk_zipfiles.  " save for maybe later
-      APPEND wa_zipfile_inst TO lt_sdk_zipfiles.  " save for now
-
-      IF file_manager->check_file_exists_at( lt_sdk_zipfiles[ op = 'install' version = lv_version ]-path ) = abap_false.
-        MESSAGE |ABAP SDK zipfile for installation in version { lv_version } not present on system. Downloading them now.| TYPE 'I' ##NO_TEXT.
-        lv_dl_result = download_sdk_zipfiles( i_file_list = mt_sdk_zipfiles
-                                              i_version   = lv_version ).
-      ELSE.
-        lv_dl_result = abap_true.
-      ENDIF.
-
-
-
-      "--- uninstall
-      IF check_sdk_zipfile_exists( i_operation = 'uninstall'
-                                  i_version = lv_version ) = abap_false.
-        DATA wa_zipfile_uninst TYPE ts_sdk_zip.
-        wa_zipfile_uninst-op = 'uninstall' ##NO_TEXT.
-        wa_zipfile_uninst-version = lv_version.
-
-        DATA(lv_zipfile_name_uninst) = file_manager->build_zipfile_name( i_operation = wa_zipfile_uninst-op
-                                                                         i_version   = lv_version ).
-
-        wa_zipfile_uninst-uri = |{ file_manager->build_download_uri_prefix( ) }{ lv_zipfile_name_uninst }|.
-
-        wa_zipfile_uninst-json_web = |{ file_manager->build_download_uri_prefix( ) }{ file_manager->build_jsonfile_name( i_operation = wa_zipfile_uninst-op i_version = lv_version ) }|.
-
-        wa_zipfile_uninst-path = file_manager->build_zipfile_path( i_zipfile_name       = lv_zipfile_name_uninst
-                                                                   i_trans_logical_path = lif_sdk_file_manager=>c_trans_logical_path ).
-
-        file_manager->validate_zipfile_path( i_zipfile_path   = wa_zipfile_uninst-path
-                                             i_logsubdir_name = lif_sdk_file_manager=>c_logsubdir_name ).
-
-        APPEND wa_zipfile_uninst TO mt_sdk_zipfiles.
-        APPEND wa_zipfile_uninst TO lt_sdk_zipfiles.
-
-        IF file_manager->check_file_exists_at( lt_sdk_zipfiles[ op = 'uninstall' version = lv_version ]-path ) = abap_false.
-          MESSAGE |ABAP SDK zipfiles for uninstallation in version { lv_version } not present on system. Downloading them now.| TYPE 'I' ##NO_TEXT.
-          lv_dl_result = download_sdk_zipfiles( i_file_list = mt_sdk_zipfiles
-                                                i_version   = lv_version ).
-        ELSE.
-          lv_dl_result = abap_true.
-        ENDIF.
-      ENDIF.
-
-      IF lv_dl_result = abap_false.
-        MESSAGE 'One or more ABAP SDK zipfiles could not be successfully downloaded, aborting' TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-        lv_result = abap_false.
-      ENDIF.
     ENDIF.
 
     r_result = lv_result.
@@ -2186,6 +2247,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
   ENDMETHOD.
 
 
+  " TODO: Move to zipfile_collection
   METHOD check_sdk_zipfiles_current.
 
     DATA lv_result TYPE abap_bool.
@@ -2204,11 +2266,12 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
         OR lcl_utils=>cmp_version_string( i_string1 = mt_available_modules_uninst[ tla = 'core' ]-avers
                                                        i_string2 = lt_mod_avail_uninst_zip[ tla = 'core' ]-avers ) = 1.
       MESSAGE 'One or more ABAP SDK zipfiles not current. Downloading new version now.' TYPE 'I' ##NO_TEXT.
-      lv_dl_result = download_sdk_zipfiles( i_file_list = mt_sdk_zipfiles ).
-      IF lv_dl_result = abap_false.
-        MESSAGE 'One or more ABAP SDK zipfiles could not be successfully downloaded, aborting' TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-        lv_result = abap_false.
-      ENDIF.
+      TRY.
+          download_sdk_zipfiles( i_version = 'LATEST' ).
+        CATCH lcx_error.
+          MESSAGE 'One or more ABAP SDK zipfiles could not be successfully downloaded, aborting' TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
+          lv_result = abap_false.
+      ENDTRY.
     ENDIF.
 
     r_result = lv_result.
@@ -2246,7 +2309,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
           i_transport             = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
           i_operation             = 'install'
           i_version               = i_target_version
-          i_zipfile_absolute_path = mt_sdk_zipfiles[ op = 'install' version = i_target_version ]-path
+          i_zipfile_absolute_path = sdk_zipfiles->get_by_op_version( i_op = 'install' i_version = i_target_version )->path
         IMPORTING
           e_cofile_name           = DATA(l_cofile_name)
           e_cofile_blob           = DATA(l_cofile_blob) ).
@@ -2258,7 +2321,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
           i_transport             = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
           i_operation             = 'install'
           i_version               = i_target_version
-          i_zipfile_absolute_path = mt_sdk_zipfiles[ op = 'install' version = i_target_version ]-path
+          i_zipfile_absolute_path = sdk_zipfiles->get_by_op_version( i_op = 'install' i_version = i_target_version )->path
         IMPORTING
           e_datafile_name         = DATA(l_datafile_name)
           e_datafile_blob         = DATA(l_datafile_blob) ).
@@ -2307,7 +2370,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
           i_transport             = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
           i_operation             = 'uninstall'
           i_version               = i_target_version
-          i_zipfile_absolute_path = mt_sdk_zipfiles[ op = 'uninstall' version = i_target_version ]-path
+          i_zipfile_absolute_path = sdk_zipfiles->get_by_op_version( i_op = 'uninstall' i_version = i_target_version )->path
         IMPORTING
           e_cofile_name           = DATA(l_uninstall_cofile_name)
           e_cofile_blob           = DATA(l_uninstall_cofile_blob) ).
@@ -2319,7 +2382,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
           i_transport             = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
           i_operation             = 'uninstall'
           i_version               = i_target_version
-          i_zipfile_absolute_path = mt_sdk_zipfiles[ op = 'uninstall' version = i_target_version ]-path
+          i_zipfile_absolute_path = sdk_zipfiles->get_by_op_version( i_op = 'uninstall' i_version = i_target_version )->path
         IMPORTING
           e_datafile_name         = DATA(l_uninstall_datafile_name)
           e_datafile_blob         = DATA(l_uninstall_datafile_blob) ).
@@ -2374,76 +2437,39 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
     DATA: lt_transport_list_inst TYPE stms_tr_requests.
     DATA: lt_transport_list_uninst TYPE stms_tr_requests.
     DATA: lt_sdk_zipfiles TYPE tt_sdk_zip.
-    DATA: wa_zipfile_inst TYPE ts_sdk_zip.
 
     IMPORT st_modules_to_be_installed = st_modules_to_be_installed FROM SHARED BUFFER indx(mi) ID 'MOD_INST'.
     IMPORT st_modules_to_be_deleted = st_modules_to_be_deleted FROM SHARED BUFFER indx(md) ID 'MOD_DELE'.
     IMPORT s_target_version = s_target_version FROM SHARED BUFFER indx(tv) ID 'TAR_VERS'.
 
 
-    IF check_sdk_zipfile_exists( i_operation = 'install'
-                                     i_version = s_target_version ) = abap_false.
+    IF check_sdk_zipfile_exists( i_operation = 'install' i_version = s_target_version ) = abap_false.
 
+      DATA(wa_zipfile_inst) = NEW lcl_sdk_zipfile( i_op = 'install' i_version = s_target_version ).
 
-      wa_zipfile_inst-op = 'install' ##NO_TEXT.
-      wa_zipfile_inst-version = s_target_version.
-
-      DATA(lv_zipfile_name_inst) = file_manager->build_zipfile_name( i_operation = wa_zipfile_inst-op i_version = s_target_version ).
-
-      wa_zipfile_inst-uri = |{ file_manager->build_download_uri_prefix( ) }{ lv_zipfile_name_inst }|.
-
-      wa_zipfile_inst-json_web = |{ file_manager->build_download_uri_prefix( ) }{ file_manager->build_jsonfile_name( i_operation = wa_zipfile_inst-op i_version = s_target_version ) }|.
-
-      wa_zipfile_inst-path = file_manager->build_zipfile_path( i_zipfile_name       = lv_zipfile_name_inst
-                                                               i_trans_logical_path = lif_sdk_file_manager=>c_trans_logical_path ).
-
-      file_manager->validate_zipfile_path( i_zipfile_path   = wa_zipfile_inst-path
-                                           i_logsubdir_name = lif_sdk_file_manager=>c_logsubdir_name ).
-
-      APPEND wa_zipfile_inst TO mt_sdk_zipfiles.  " save for later
-      APPEND wa_zipfile_inst TO lt_sdk_zipfiles.  " save for now
+      sdk_zipfiles->add( i_zipfile = wa_zipfile_inst ).
 
     ELSE.
-      wa_zipfile_inst = mt_sdk_zipfiles[ op = 'install' version = s_target_version ].
-      APPEND wa_zipfile_inst TO lt_sdk_zipfiles.  " save for now
+      wa_zipfile_inst = sdk_zipfiles->get_by_op_version( i_op = 'install' i_version = s_target_version ).
     ENDIF.
 
-    IF file_manager->check_file_exists_at( lt_sdk_zipfiles[ op = 'install' version = s_target_version ]-path ) = abap_false.
-      download_sdk_zipfiles( i_file_list = lt_sdk_zipfiles
-                             i_version   = s_target_version ).
+    IF file_manager->check_file_exists_at( wa_zipfile_inst->path ) = abap_false.
+      download_sdk_zipfiles( i_version = s_target_version ).
     ENDIF.
 
 
-    IF check_sdk_zipfile_exists( i_operation = 'uninstall'
-                                     i_version = s_target_version ) = abap_false.
-      DATA wa_zipfile_uninst TYPE ts_sdk_zip.
-      wa_zipfile_uninst-op = 'uninstall' ##NO_TEXT.
-      wa_zipfile_uninst-version = s_target_version.
+    IF check_sdk_zipfile_exists( i_operation = 'uninstall' i_version = s_target_version ) = abap_false.
 
-      DATA(lv_zipfile_name_uninst) = file_manager->build_zipfile_name( i_operation = wa_zipfile_uninst-op
-                                                                       i_version   = s_target_version ).
+      DATA(wa_zipfile_uninst) = NEW lcl_sdk_zipfile( i_op = 'uninstall' i_version = s_target_version ).
 
-      wa_zipfile_uninst-uri = |{ file_manager->build_download_uri_prefix( ) }{ lv_zipfile_name_uninst }|.
-
-      wa_zipfile_uninst-json_web = |{ file_manager->build_download_uri_prefix( ) }{ file_manager->build_jsonfile_name( i_operation = wa_zipfile_uninst-op i_version = s_target_version ) }|.
-
-      wa_zipfile_uninst-path = file_manager->build_zipfile_path( i_zipfile_name       = lv_zipfile_name_uninst
-                                                                 i_trans_logical_path = lif_sdk_file_manager=>c_trans_logical_path ).
-
-      file_manager->validate_zipfile_path( i_zipfile_path   = wa_zipfile_uninst-path
-                                           i_logsubdir_name = lif_sdk_file_manager=>c_logsubdir_name ).
-
-      APPEND wa_zipfile_uninst TO mt_sdk_zipfiles.
-      APPEND wa_zipfile_uninst TO lt_sdk_zipfiles.
+      sdk_zipfiles->add( i_zipfile = wa_zipfile_uninst ).
 
     ELSE.
-      wa_zipfile_uninst = mt_sdk_zipfiles[ op = 'uninstall' version = s_target_version ].
-      APPEND wa_zipfile_uninst TO lt_sdk_zipfiles.  " save for now
+      wa_zipfile_uninst = sdk_zipfiles->get_by_op_version( i_op = 'uninstall' i_version = s_target_version ).
     ENDIF.
 
-    IF file_manager->check_file_exists_at( lt_sdk_zipfiles[ op = 'uninstall' version = s_target_version ]-path ) = abap_false.
-      download_sdk_zipfiles( i_file_list = lt_sdk_zipfiles
-                             i_version   = s_target_version ).
+    IF file_manager->check_file_exists_at( wa_zipfile_uninst->path ) = abap_false.
+      download_sdk_zipfiles( i_version = s_target_version ).
     ENDIF.
 
 
@@ -2451,22 +2477,22 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
     WRITE /.
 
     WRITE /.
-    WRITE / |Modules to be installed (transport file { wa_zipfile_inst-path }| ##NO_TEXT.
+    WRITE / |Modules to be installed (transport file { wa_zipfile_inst->path }| ##NO_TEXT.
     LOOP AT st_modules_to_be_installed ASSIGNING FIELD-SYMBOL(<fs_mod_inst>).
       WRITE <fs_mod_inst>-tla && | |.
     ENDLOOP.
 
     WRITE /.
-    WRITE / |to be deleted (transport file { wa_zipfile_uninst-path }| ##NO_TEXT.
+    WRITE / |to be deleted (transport file { wa_zipfile_uninst->path }| ##NO_TEXT.
     LOOP AT st_modules_to_be_deleted ASSIGNING FIELD-SYMBOL(<fs_mod_dele>).
       WRITE / <fs_mod_dele>-tla && | |.
     ENDLOOP.
 
     DATA lt_avail_modules_inst TYPE tt_sdk_module.
     lt_avail_modules_inst = get_sdk_avail_modules_json(
-      i_operation = wa_zipfile_inst-op
+      i_operation = wa_zipfile_inst->op
       i_source    = 'zip'
-      i_version   = wa_zipfile_inst-version
+      i_version   = wa_zipfile_inst->version
     ).
 
     LOOP AT st_modules_to_be_installed ASSIGNING FIELD-SYMBOL(<fs_module_to_be_installed>).
@@ -2476,7 +2502,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
           i_transport             = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
           i_operation             = 'install'
           i_version               = s_target_version
-          i_zipfile_absolute_path = mt_sdk_zipfiles[ op = 'install' version = s_target_version ]-path
+          i_zipfile_absolute_path = sdk_zipfiles->get_by_op_version( i_op = 'install' i_version = s_target_version )->path
         IMPORTING
           e_cofile_name           = DATA(l_cofile_name)
           e_cofile_blob           = DATA(l_cofile_blob) ).
@@ -2490,7 +2516,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
           i_transport             = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
           i_operation             = 'install'
           i_version               = s_target_version
-          i_zipfile_absolute_path = mt_sdk_zipfiles[ op = 'install' version = s_target_version ]-path
+          i_zipfile_absolute_path = sdk_zipfiles->get_by_op_version( i_op = 'install' i_version = s_target_version )->path
         IMPORTING
           e_datafile_name         = DATA(l_datafile_name)
           e_datafile_blob         = DATA(l_datafile_blob) ).
@@ -2527,9 +2553,9 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
 
     DATA lt_avail_modules_uninst TYPE tt_sdk_module.
     lt_avail_modules_uninst = get_sdk_avail_modules_json(
-      i_operation = wa_zipfile_uninst-op
+      i_operation = wa_zipfile_uninst->op
       i_source    = 'zip'
-      i_version   = wa_zipfile_uninst-version
+      i_version   = wa_zipfile_uninst->version
     ).
 
 
@@ -2542,7 +2568,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
           i_transport             = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
           i_operation             = 'uninstall'
           i_version               = s_target_version
-          i_zipfile_absolute_path = mt_sdk_zipfiles[ op = 'uninstall' version = s_target_version ]-path
+          i_zipfile_absolute_path = sdk_zipfiles->get_by_op_version( i_op = 'uninstall' i_version = s_target_version )->path
         IMPORTING
           e_cofile_name           = DATA(l_uninstall_cofile_name)
           e_cofile_blob           = DATA(l_uninstall_cofile_blob) ).
@@ -2554,7 +2580,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
           i_transport             = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
           i_operation             = 'uninstall'
           i_version               = s_target_version
-          i_zipfile_absolute_path = mt_sdk_zipfiles[ op = 'uninstall' version = s_target_version ]-path
+          i_zipfile_absolute_path = sdk_zipfiles->get_by_op_version( i_op = 'uninstall' i_version = s_target_version )->path
         IMPORTING
           e_datafile_name         = DATA(l_uninstall_datafile_name)
           e_datafile_blob         = DATA(l_uninstall_datafile_blob) ).
@@ -2589,96 +2615,66 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
 
   ENDMETHOD.
 
-
+  " TODO: Move to zipfile_collection
   METHOD download_sdk_zipfiles.
     DATA l_dir_tmp_path TYPE text255.
     DATA lv_result TYPE abap_bool VALUE abap_true.
     DATA lt_sdk_zipfiles TYPE tt_sdk_zip.
     DATA wa_sdk_zipfile TYPE ts_sdk_zip.
 
-    INSERT VALUE ts_sdk_zip( op = 'install' version = i_version ) INTO TABLE lt_sdk_zipfiles.
-    INSERT VALUE ts_sdk_zip( op = 'uninstall' version = i_version ) INTO TABLE lt_sdk_zipfiles.
+    DATA(wa_zipfile_inst) = NEW lcl_sdk_zipfile( i_op = 'install' i_version = i_version ).
+    DATA(wa_zipfile_uninst) = NEW lcl_sdk_zipfile( i_op = 'uninstall' i_version = i_version ).
 
-    LOOP AT lt_sdk_zipfiles ASSIGNING FIELD-SYMBOL(<fs_sdk_zipfile>).
+    download_sdk_zipfile( wa_zipfile_inst ).
+    download_sdk_zipfile( wa_zipfile_uninst ).
 
-      DATA(lv_zipfile_name) = file_manager->build_zipfile_name( i_operation = <fs_sdk_zipfile>-op
-                                                                i_version   = <fs_sdk_zipfile>-version ).
+  ENDMETHOD.
 
-      DATA(lv_jsonfile_name) = file_manager->build_jsonfile_name( i_operation = <fs_sdk_zipfile>-op
-                                                                  i_version   = <fs_sdk_zipfile>-version ).
+  " TODO: Move to zipfile_collection
+  METHOD download_sdk_zipfile.
 
-      <fs_sdk_zipfile>-uri = |{ file_manager->build_download_uri_prefix(  ) }{ lv_zipfile_name }|.
-
-      <fs_sdk_zipfile>-json_web = |{ file_manager->build_download_uri_prefix(  ) }{ lv_jsonfile_name }|.
-
-      <fs_sdk_zipfile>-path = file_manager->build_zipfile_path( i_zipfile_name       = lv_zipfile_name
-                                                                i_trans_logical_path = lif_sdk_file_manager=>c_trans_logical_path ).
-
-      file_manager->validate_zipfile_path( i_zipfile_path   = <fs_sdk_zipfile>-path
-                                           i_logsubdir_name = lif_sdk_file_manager=>c_logsubdir_name ).
-
-
-      IF file_manager->check_file_writable_at( i_path = <fs_sdk_zipfile>-path ) = abap_false.
-        MESSAGE |File at path { <fs_sdk_zipfile>-path } not writable!| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-        lv_result = abap_false.
-        EXIT.
-      ENDIF.
-
-      cl_progress_indicator=>progress_indicate( i_text               = |Downloading { lv_zipfile_name } ...|
-                                                i_processed          = sy-tabix
-                                                i_total              = lines( lt_sdk_zipfiles )
-                                                i_output_immediately = abap_true ) ##NO_TEXT.
-
-      DATA(e_zipfile_blob) = internet_manager->download( i_absolute_uri = <fs_sdk_zipfile>-uri
-                                                         i_blankstocrlf = abap_false ).
-
-
-
-      TRY.
-          file_manager->open_for_output( <fs_sdk_zipfile>-path ).
-          TRANSFER e_zipfile_blob TO <fs_sdk_zipfile>-path.
-          CLOSE DATASET <fs_sdk_zipfile>-path.
-        CATCH cx_sy_file_authority INTO DATA(r_ex1).
-          RAISE EXCEPTION TYPE lcx_error
-            EXPORTING
-              previous = r_ex1
-              iv_msg   = r_ex1->get_text( ).
-        CATCH cx_sy_file_access_error INTO DATA(r_ex2).
-          RAISE EXCEPTION TYPE lcx_error
-            EXPORTING
-              previous = r_ex2
-              iv_msg   = r_ex1->get_text( ).
-        CATCH cx_root INTO DATA(r_ex).
-          RAISE EXCEPTION TYPE lcx_error
-            EXPORTING
-              previous = r_ex
-              iv_msg   = r_ex1->get_text( ).
-      ENDTRY.
-
-      IF sy-subrc <> 0.
-        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not convert data to XSTRING.| ##NO_TEXT.
-      ENDIF.
-
-    ENDLOOP.
-
-    IF NOT line_exists( mt_sdk_zipfiles[ op = 'install' version = i_version ] )
-      AND NOT line_exists( mt_sdk_zipfiles[ op = 'uninstall' version = i_version ] ).
-      INSERT LINES OF lt_sdk_zipfiles INTO TABLE mt_sdk_zipfiles.
-    ELSE.
-      LOOP AT mt_sdk_zipfiles ASSIGNING FIELD-SYMBOL(<fs_zip>).
-        LOOP AT lt_sdk_zipfiles INTO wa_sdk_zipfile.
-          IF <fs_zip>-op = wa_sdk_zipfile-op
-            AND <fs_zip>-version = wa_sdk_zipfile-version.
-            <fs_zip>-uri =  wa_sdk_zipfile-uri.
-            <fs_zip>-path =  wa_sdk_zipfile-path.
-            <fs_zip>-json_web =  wa_sdk_zipfile-json_web.
-          ENDIF.
-        ENDLOOP.
-      ENDLOOP.
+    IF file_manager->check_file_writable_at( i_path = i_zipfile->path ) = abap_false.
+      MESSAGE |File at path { i_zipfile->path } not writable!| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
+      EXIT.
     ENDIF.
 
-    r_success = lv_result.
+    cl_progress_indicator=>progress_indicate( i_text               = |Downloading { i_zipfile->name } ...|
+                                              i_processed          = sy-tabix
+                                              i_output_immediately = abap_true ) ##NO_TEXT.
 
+    DATA(e_zipfile_blob) = internet_manager->download( i_absolute_uri = i_zipfile->uri
+                                                       i_blankstocrlf = abap_false ).
+
+
+    TRY.
+        file_manager->open_for_output( i_zipfile->path ).
+        TRANSFER e_zipfile_blob TO i_zipfile->path.
+        CLOSE DATASET i_zipfile->path.
+      CATCH cx_sy_file_authority INTO DATA(r_ex1).
+        RAISE EXCEPTION TYPE lcx_error
+          EXPORTING
+            previous = r_ex1
+            iv_msg   = r_ex1->get_text( ).
+      CATCH cx_sy_file_access_error INTO DATA(r_ex2).
+        RAISE EXCEPTION TYPE lcx_error
+          EXPORTING
+            previous = r_ex2
+            iv_msg   = r_ex1->get_text( ).
+      CATCH cx_root INTO DATA(r_ex).
+        RAISE EXCEPTION TYPE lcx_error
+          EXPORTING
+            previous = r_ex
+            iv_msg   = r_ex1->get_text( ).
+    ENDTRY.
+
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not convert data to XSTRING.| ##NO_TEXT.
+    ENDIF.
+
+
+    IF NOT sdk_zipfiles->exists( i_op = i_zipfile->op i_version = i_zipfile->version ).
+      sdk_zipfiles->add( i_zipfile ).
+    ENDIF.
 
   ENDMETHOD.
 
@@ -2689,13 +2685,6 @@ ENDCLASS.
 
 CLASS lcl_ui_tree_controller DEFINITION FINAL.
   PUBLIC SECTION.
-
-    CONSTANTS: c_operation_none              TYPE i VALUE 0,
-               c_operation_install           TYPE i VALUE 1,
-               c_operation_delete            TYPE i VALUE 2,
-               c_operation_update            TYPE i VALUE 3,
-               c_batch_rec_threshold         TYPE i VALUE 5,
-               c_sapgui_autologout_threshold TYPE i VALUE 900.
 
     INTERFACES
       if_salv_csqt_content_manager.
@@ -2769,13 +2758,6 @@ CLASS lcl_ui_tree_controller DEFINITION FINAL.
       set_handlers,
       set_settings,
       set_functions,
-      check_sdk_zipfiles_present
-        IMPORTING i_version       TYPE string DEFAULT 'LATEST'
-        RETURNING VALUE(r_result) TYPE abap_bool
-        RAISING   lcx_error,
-      check_sdk_zipfiles_current
-        RETURNING VALUE(r_result) TYPE abap_bool
-        RAISING   lcx_error,
       check_selection_sanity
         IMPORTING it_modules_tbi  TYPE tt_sdk_tla
                   it_modules_tbd  TYPE tt_sdk_tla
@@ -3087,22 +3069,22 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
                                                     i_string2 = wa_core_module-cvers ) = 0.
         wa_core_module-op_icon = '@08@'.
         wa_core_module-op_text = 'Module up to date, no operation planned.' ##NO_TEXT.
-        wa_core_module-op_code = c_operation_none.
+        wa_core_module-op_code = lif_ui_constants=>c_operation_none.
       ELSEIF lcl_utils=>cmp_version_string( i_string1 = mt_available_modules_inst[ tla = 'core' ]-avers
                                                         i_string2 = wa_core_module-cvers ) = 1.
         wa_core_module-op_icon = '@09@'.
         wa_core_module-op_text = 'Module will be updated.' ##NO_TEXT.
-        wa_core_module-op_code = c_operation_update.
+        wa_core_module-op_code = lif_ui_constants=>c_operation_update.
       ELSE.
         wa_core_module-op_icon = '@0A@'.
         wa_core_module-op_text = 'Current version higher than available version. Module may be deprecated.' ##NO_TEXT.
-        wa_core_module-op_code = c_operation_none.
+        wa_core_module-op_code = lif_ui_constants=>c_operation_none.
       ENDIF.
 
     ELSE.
 
       wa_core_module-op_text = 'Will NOT be installed.' ##NO_TEXT.
-      wa_core_module-op_code = c_operation_none.
+      wa_core_module-op_code = lif_ui_constants=>c_operation_none.
       wa_core_module-op_icon = '@EB@'.
 
     ENDIF.
@@ -3266,16 +3248,16 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
                                                       i_string2 = wa_installed_module-cvers ) = 0.
           wa_installed_module-op_icon = '@08@'.
           wa_installed_module-op_text = 'Module up to date, no operation planned.' ##NO_TEXT.
-          wa_installed_module-op_code = c_operation_none.
+          wa_installed_module-op_code = lif_ui_constants=>c_operation_none.
         ELSEIF lcl_utils=>cmp_version_string( i_string1 = wa_installed_module-avers
                                                           i_string2 = wa_installed_module-cvers ) = 1.
           wa_installed_module-op_icon = '@09@'.
           wa_installed_module-op_text = 'Module will be updated.' ##NO_TEXT.
-          wa_installed_module-op_code = c_operation_update.
+          wa_installed_module-op_code = lif_ui_constants=>c_operation_update.
         ELSE.
           wa_installed_module-op_icon = '@0A@'.
           wa_installed_module-op_text = 'Current version higher than available version. Module may be deprecated.' ##NO_TEXT.
-          wa_installed_module-op_code = c_operation_none.
+          wa_installed_module-op_code = lif_ui_constants=>c_operation_none.
         ENDIF.
 
 
@@ -3457,7 +3439,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
           l_text = <fs_available_module>-tla.
           <fs_available_module>-op_text = 'Will NOT be installed.' ##NO_TEXT.
-          <fs_available_module>-op_code = c_operation_none.
+          <fs_available_module>-op_code = lif_ui_constants=>c_operation_none.
           <fs_available_module>-op_icon = '@EB@'.
 
           " Draw processing status when bg job is running
@@ -4050,7 +4032,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
       RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
     ENDIF.
 
-    IF lv_gui_auto_timeout > c_sapgui_autologout_threshold.
+    IF lv_gui_auto_timeout > lif_ui_constants=>c_sapgui_autologout_threshold.
       lv_result = abap_true.
     ENDIF.
 
@@ -4081,7 +4063,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
           IF <fs_node>-node->get_hierarchy_item( )->is_checked( )
             AND NOT <fs_node>-node->is_folder( )
-            AND CAST string( <fs_node>-node->get_item( 'OP_CODE' )->get_value( ) )->* = c_operation_install.
+            AND CAST string( <fs_node>-node->get_item( 'OP_CODE' )->get_value( ) )->* = lif_ui_constants=>c_operation_install.
 
             IF <fs_node>-node->get_text( ) = 'sts' OR
                 <fs_node>-node->get_text( ) = 's3' OR
@@ -4127,7 +4109,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
           IF NOT <fs_node>-node->get_hierarchy_item( )->is_checked( )
           AND NOT <fs_node>-node->is_folder( )
-          AND CAST string( <fs_node>-node->get_item( 'OP_CODE' )->get_value( ) )->* = c_operation_delete.
+          AND CAST string( <fs_node>-node->get_item( 'OP_CODE' )->get_value( ) )->* = lif_ui_constants=>c_operation_delete.
 
             IF <fs_node>-node->get_text( ) = 'sts' OR
                 <fs_node>-node->get_text( ) = 's3' OR
@@ -4176,7 +4158,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
           IF <fs_node>-node->get_hierarchy_item( )->is_checked( )
             AND NOT <fs_node>-node->is_folder( )
-            AND CAST string( <fs_node>-node->get_item( 'OP_CODE' )->get_value( ) )->* = c_operation_update.
+            AND CAST string( <fs_node>-node->get_item( 'OP_CODE' )->get_value( ) )->* = lif_ui_constants=>c_operation_update.
 
             IF <fs_node>-node->get_text( ) = 'sts' OR
                 <fs_node>-node->get_text( ) = 's3' OR
@@ -4194,122 +4176,6 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
-
-
-  METHOD check_sdk_zipfiles_present.
-
-    DATA lv_result TYPE abap_bool.
-    DATA lv_version TYPE string.
-    DATA lv_dl_result TYPE abap_bool.
-    DATA: lt_sdk_zipfiles TYPE tt_sdk_zip.
-    lv_result = abap_true.
-    lv_version = i_version.
-
-    IF mr_sdk_package_manager->check_sdk_zipfile_exists( i_operation = 'install' i_version = lv_version ) = abap_false
-        OR mr_sdk_package_manager->check_sdk_zipfile_exists( i_operation = 'uninstall' i_version = lv_version ) = abap_false.
-
-
-      "--- install
-      DATA wa_zipfile_inst TYPE ts_sdk_zip.
-      wa_zipfile_inst-op = 'install' ##NO_TEXT.
-      wa_zipfile_inst-version = lv_version.
-
-      DATA(lv_zipfile_name_inst) = mr_sdk_package_manager->file_manager->build_zipfile_name( i_operation = wa_zipfile_inst-op i_version = lv_version ).
-
-      wa_zipfile_inst-uri = |{ mr_sdk_package_manager->file_manager->build_download_uri_prefix( ) }{ lv_zipfile_name_inst }|.
-
-      wa_zipfile_inst-json_web = |{ mr_sdk_package_manager->file_manager->build_download_uri_prefix( ) }{ mr_sdk_package_manager->file_manager->build_jsonfile_name( i_operation = wa_zipfile_inst-op i_version = lv_version ) }|.
-
-      wa_zipfile_inst-path = mr_sdk_package_manager->file_manager->build_zipfile_path( i_zipfile_name       = lv_zipfile_name_inst
-                                                                                       i_trans_logical_path = lif_sdk_file_manager=>c_trans_logical_path ).
-
-      mr_sdk_package_manager->file_manager->validate_zipfile_path( i_zipfile_path   = wa_zipfile_inst-path
-                                                                   i_logsubdir_name = lif_sdk_file_manager=>c_logsubdir_name ).
-
-      APPEND wa_zipfile_inst TO mr_sdk_package_manager->mt_sdk_zipfiles.  " save for maybe later
-      APPEND wa_zipfile_inst TO lt_sdk_zipfiles.  " save for now
-
-      IF mr_sdk_package_manager->file_manager->check_file_exists_at( lt_sdk_zipfiles[ op = 'install' version = lv_version ]-path ) = abap_false.
-        MESSAGE |ABAP SDK zipfile for installation in version { lv_version } not present on system. Downloading them now.| TYPE 'I' ##NO_TEXT.
-        lv_dl_result = mr_sdk_package_manager->download_sdk_zipfiles( i_file_list = mr_sdk_package_manager->mt_sdk_zipfiles
-                                                                      i_version   = lv_version ).
-      ELSE.
-        lv_dl_result = abap_true.
-      ENDIF.
-
-
-
-      "--- uninstall
-      IF mr_sdk_package_manager->check_sdk_zipfile_exists( i_operation = 'uninstall'
-                                  i_version = lv_version ) = abap_false.
-        DATA wa_zipfile_uninst TYPE ts_sdk_zip.
-        wa_zipfile_uninst-op = 'uninstall' ##NO_TEXT.
-        wa_zipfile_uninst-version = lv_version.
-
-        DATA(lv_zipfile_name_uninst) = mr_sdk_package_manager->file_manager->build_zipfile_name( i_operation = wa_zipfile_uninst-op
-                                                                                                 i_version   = lv_version ).
-
-        wa_zipfile_uninst-uri = |{ mr_sdk_package_manager->file_manager->build_download_uri_prefix( ) }{ lv_zipfile_name_uninst }|.
-
-        wa_zipfile_uninst-json_web = |{ mr_sdk_package_manager->file_manager->build_download_uri_prefix( ) }{ mr_sdk_package_manager->file_manager->build_jsonfile_name( i_operation = wa_zipfile_uninst-op i_version = lv_version ) }|.
-
-        wa_zipfile_uninst-path = mr_sdk_package_manager->file_manager->build_zipfile_path( i_zipfile_name       = lv_zipfile_name_uninst
-                                                                                           i_trans_logical_path = lif_sdk_file_manager=>c_trans_logical_path ).
-
-        mr_sdk_package_manager->file_manager->validate_zipfile_path( i_zipfile_path   = wa_zipfile_uninst-path
-                                                                     i_logsubdir_name = lif_sdk_file_manager=>c_logsubdir_name ).
-
-        APPEND wa_zipfile_uninst TO mr_sdk_package_manager->mt_sdk_zipfiles.
-        APPEND wa_zipfile_uninst TO lt_sdk_zipfiles.
-
-        IF mr_sdk_package_manager->file_manager->check_file_exists_at( lt_sdk_zipfiles[ op = 'uninstall' version = lv_version ]-path ) = abap_false.
-          MESSAGE |ABAP SDK zipfiles for uninstallation in version { lv_version } not present on system. Downloading them now.| TYPE 'I' ##NO_TEXT.
-          lv_dl_result = mr_sdk_package_manager->download_sdk_zipfiles( i_file_list = mr_sdk_package_manager->mt_sdk_zipfiles
-                                                                        i_version   = lv_version ).
-        ELSE.
-          lv_dl_result = abap_true.
-        ENDIF.
-      ENDIF.
-
-      IF lv_dl_result = abap_false.
-        MESSAGE 'One or more ABAP SDK zipfiles could not be successfully downloaded, aborting' TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-        lv_result = abap_false.
-      ENDIF.
-    ENDIF.
-
-    r_result = lv_result.
-
-  ENDMETHOD.
-
-
-  METHOD check_sdk_zipfiles_current.
-
-    DATA lv_result TYPE abap_bool.
-    DATA lv_dl_result TYPE abap_bool.
-    lv_result = abap_true.
-
-    DATA(lt_mod_avail_inst_zip) = mr_sdk_package_manager->get_sdk_avail_modules_json( i_operation = 'install'
-                                                                                      i_source    = 'zip'
-                                                                                      i_version   = 'LATEST' ).
-    DATA(lt_mod_avail_uninst_zip) = mr_sdk_package_manager->get_sdk_avail_modules_json( i_operation = 'uninstall'
-                                                                                        i_source    = 'zip'
-                                                                                        i_version   = 'LATEST' ).
-
-    IF lcl_utils=>cmp_version_string( i_string1 = mt_available_modules_inst[ tla = 'core' ]-avers
-                                                       i_string2 = lt_mod_avail_inst_zip[ tla = 'core' ]-avers ) = 1
-        OR lcl_utils=>cmp_version_string( i_string1 = mt_available_modules_uninst[ tla = 'core' ]-avers
-                                                       i_string2 = lt_mod_avail_uninst_zip[ tla = 'core' ]-avers ) = 1.
-      MESSAGE 'One or more ABAP SDK zipfiles not current. Downloading new version now.' TYPE 'I' ##NO_TEXT.
-      lv_dl_result = mr_sdk_package_manager->download_sdk_zipfiles( i_file_list = mr_sdk_package_manager->mt_sdk_zipfiles ).
-      IF lv_dl_result = abap_false.
-        MESSAGE 'One or more ABAP SDK zipfiles could not be successfully downloaded, aborting' TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-        lv_result = abap_false.
-      ENDIF.
-    ENDIF.
-
-    r_result = lv_result.
-
-  ENDMETHOD.
 
   METHOD check_selection_mod_thresholds.
 
@@ -4377,7 +4243,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
         ENDIF.
 
-        IF ( lv_number_new_modules > c_batch_rec_threshold OR lv_number_modules_inst > c_batch_rec_threshold )
+        IF ( lv_number_new_modules > lif_ui_constants=>c_batch_rec_threshold OR lv_number_modules_inst > lif_ui_constants=>c_batch_rec_threshold )
             AND ( i_salv_function = 'STRT' OR i_salv_function = 'EXE_FGND' OR i_salv_function = 'INS_FGND' ).
           lv_text = |You have selected { lv_number_new_modules + lv_number_modules_inst } modules for installation (or update). |
                  & |This can take a while (using batch mode is recommended). |
@@ -4424,7 +4290,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
         DATA(lv_number_modules_tbd) = lines( it_modules_tbd ).
 
-        IF lv_number_modules_tbd > c_batch_rec_threshold
+        IF lv_number_modules_tbd > lif_ui_constants=>c_batch_rec_threshold
             AND ( i_salv_function = 'STRT' OR i_salv_function = 'EXE_FGND' OR i_salv_function = 'DEL_FGND' ).
           lv_text = |You have selected { lv_number_modules_tbd } modules for deletion. |
                          && |This can take a while (using batch mode is recommended). |
@@ -4632,11 +4498,11 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
             IF lines( mt_modules_to_be_installed ) > 0
               OR lines( mt_modules_to_be_deleted ) > 0
               OR lines( mt_modules_to_be_updated ) > 0.
-              IF check_sdk_zipfiles_present( i_version = lv_target_version ) = abap_false.
+              IF mr_sdk_package_manager->check_sdk_zipfiles_present( i_version = lv_target_version ) = abap_false.
                 RETURN.
               ENDIF.
 
-              IF check_sdk_zipfiles_current( ) = abap_false.
+              IF mr_sdk_package_manager->check_sdk_zipfiles_current( ) = abap_false.
                 RETURN.
               ENDIF.
 
@@ -4672,11 +4538,11 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
             IF lines( mt_modules_to_be_installed ) > 0
               OR lines( mt_modules_to_be_deleted ) > 0
               OR lines( mt_modules_to_be_updated ) > 0.
-              IF check_sdk_zipfiles_present( i_version = lv_target_version ) = abap_false.
+              IF mr_sdk_package_manager->check_sdk_zipfiles_present( i_version = lv_target_version ) = abap_false.
                 RETURN.
               ENDIF.
 
-              IF check_sdk_zipfiles_current( ) = abap_false.
+              IF mr_sdk_package_manager->check_sdk_zipfiles_current( ) = abap_false.
                 RETURN.
               ENDIF.
 
@@ -4721,7 +4587,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
             IF lines( mt_modules_to_be_installed ) > 0.
 
-              IF check_sdk_zipfiles_present( i_version = lv_target_version ) = abap_false.
+              IF mr_sdk_package_manager->check_sdk_zipfiles_present( i_version = lv_target_version ) = abap_false.
                 RETURN.
               ENDIF.
 
@@ -4761,7 +4627,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
             IF lines( mt_modules_to_be_installed ) > 0.
 
-              IF check_sdk_zipfiles_present( i_version = lv_target_version ) = abap_false.
+              IF mr_sdk_package_manager->check_sdk_zipfiles_present( i_version = lv_target_version ) = abap_false.
                 RETURN.
               ENDIF.
 
@@ -4805,7 +4671,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
             IF lines( mt_modules_to_be_deleted ) > 0.
 
-              IF check_sdk_zipfiles_present( i_version = lv_target_version ) = abap_false.
+              IF mr_sdk_package_manager->check_sdk_zipfiles_present( i_version = lv_target_version ) = abap_false.
                 RETURN.
               ENDIF.
 
@@ -4845,7 +4711,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
             IF lines( mt_modules_to_be_deleted ) > 0.
 
-              IF check_sdk_zipfiles_present( i_version = lv_target_version ) = abap_false.
+              IF mr_sdk_package_manager->check_sdk_zipfiles_present( i_version = lv_target_version ) = abap_false.
                 RETURN.
               ENDIF.
 
@@ -4878,50 +4744,13 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
           WHEN 'DOW_CERT'.
 
-            mr_sdk_package_manager->certificate_manager->lif_sdk_certificate_manager~install_amazon_root_certs( ).
+            mr_sdk_package_manager->certificate_manager->install_amazon_root_certs( i_internet_manager = mr_sdk_package_manager->internet_manager ).
 
           WHEN 'DOW_TRAK'.
 
-            mr_sdk_package_manager->download_sdk_zipfiles( i_file_list = mr_sdk_package_manager->mt_sdk_zipfiles ).
+            mr_sdk_package_manager->download_sdk_zipfiles( i_version = 'LATEST' ).
 
           WHEN 'INS_ALL'.
-
-*            lv_target_version = 'LATEST'.
-*
-*            CLEAR: mt_modules_to_be_installed.
-*            CLEAR: mt_modules_to_be_deleted.
-*            DATA(lt_available_modules_cv) = mr_sdk_package_manager->get_sdk_avail_modules_json( i_operation = 'install'
-*                                                                                                        i_source    = 'web'
-*                                                                                                        i_version   = lv_target_version ).
-*            DATA: wa_available_module_cv TYPE ts_sdk_module.
-*            LOOP AT lt_available_modules_cv INTO wa_available_module_cv.
-*              INSERT VALUE ts_sdk_tla( tla = wa_available_module_cv-tla version = lv_target_version ) INTO TABLE mt_modules_to_be_installed .
-*            ENDLOOP.
-*
-*
-*
-*            "IF check_selection_sanity( it_modules_tbi = mt_modules_to_be_installed
-*            "                                       it_modules_tbd = mt_modules_to_be_deleted
-*            "                                       i_salv_function = e_salv_function
-*            "                                       i_op = 'install' ) = abap_false.
-*            "  RETURN.
-*            "ENDIF.
-*
-*            IF lines( mt_modules_to_be_installed ) > 0.
-*
-*              IF check_sdk_zipfiles_present( i_version = lv_target_version ) = abap_false.
-*                RETURN.
-*              ENDIF.
-*
-*              IF check_sdk_zipfiles_current( ) = abap_false.
-*                RETURN.
-*              ENDIF.
-*
-*            ENDIF.
-*
-*            l_jobnumber = mr_sdk_package_manager->submit_batch_job( i_modules_to_be_installed = mt_modules_to_be_installed
-*                                                                        i_modules_to_be_deleted   = mt_modules_to_be_deleted
-*                                                                        i_target_version          = lv_target_version ).
 
             DATA(lv_text) = |Installing all modules is discouraged and should only be done in demo systems. |
                    && |Continue? | ##NO_TEXT.
@@ -5004,7 +4833,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
           IF is_core_installed( ) = abap_false.
             wa_row-op_text = 'Will be installed.' ##NO_TEXT.
             wa_row-op_icon = '@08@'.
-            wa_row-op_code = c_operation_install.
+            wa_row-op_code = lif_ui_constants=>c_operation_install.
             l_node->set_data_row( wa_row ).
 
           ELSE.
@@ -5012,12 +4841,12 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
                                                           i_string2 = mt_installed_modules[ tla = 'sts' ]-cvers ) = 1.
               wa_row-op_text = 'Module will be updated.' ##NO_TEXT.
               wa_row-op_icon = '@09@'.
-              wa_row-op_code = c_operation_update.
+              wa_row-op_code = lif_ui_constants=>c_operation_update.
               l_node->set_data_row( wa_row ).
             ELSE.
               wa_row-op_text = 'Module up to date, no operation planned.' ##NO_TEXT.
               wa_row-op_icon = '@08@'.
-              wa_row-op_code = c_operation_none.
+              wa_row-op_code = lif_ui_constants=>c_operation_none.
               l_node->set_data_row( wa_row ).
             ENDIF.
           ENDIF.
@@ -5027,14 +4856,14 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
           IF is_core_installed( ) = abap_true.
             wa_row-op_text = 'Will be deleted.' ##NO_TEXT.
             wa_row-op_icon = '@0A@'.
-            wa_row-op_code = c_operation_delete.
+            wa_row-op_code = lif_ui_constants=>c_operation_delete.
             l_node->set_data_row( wa_row ).
 
 
           ELSE.
             wa_row-op_text = 'Will NOT be installed.' ##NO_TEXT.
             wa_row-op_icon = '@EB@'.
-            wa_row-op_code = c_operation_none.
+            wa_row-op_code = lif_ui_constants=>c_operation_none.
             l_node->set_data_row( wa_row ).
 
           ENDIF.
@@ -5050,7 +4879,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
           IF VALUE #( mt_installed_modules[ tla = l_tla ] OPTIONAL ) IS INITIAL .
             wa_row-op_text = 'Will be installed.' ##NO_TEXT.
             wa_row-op_icon = '@08@'.
-            wa_row-op_code = c_operation_install.
+            wa_row-op_code = lif_ui_constants=>c_operation_install.
             l_node->set_data_row( wa_row ).
 
           ELSE.
@@ -5058,18 +4887,18 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
                                                           i_string2 = mt_installed_modules[ tla = l_tla ]-cvers ) = 1.
               wa_row-op_text = 'Module will be updated.' ##NO_TEXT.
               wa_row-op_icon = '@09@' ##NO_TEXT.
-              wa_row-op_code = c_operation_update.
+              wa_row-op_code = lif_ui_constants=>c_operation_update.
               l_node->set_data_row( wa_row ).
             ELSEIF lcl_utils=>cmp_version_string( i_string1 = mt_installed_modules[ tla = l_tla ]-avers
                                                           i_string2 = mt_installed_modules[ tla = l_tla ]-cvers ) = 0.
               wa_row-op_text = 'Module up to date, no operation planned.' ##NO_TEXT.
               wa_row-op_icon = '@08@' ##NO_TEXT.
-              wa_row-op_code = c_operation_none.
+              wa_row-op_code = lif_ui_constants=>c_operation_none.
               l_node->set_data_row( wa_row ).
             ELSE.
               wa_row-op_text = 'Current version higher than available version. Module may be deprecated.' ##NO_TEXT.
               wa_row-op_icon = '@0A@' ##NO_TEXT.
-              wa_row-op_code = c_operation_none.
+              wa_row-op_code = lif_ui_constants=>c_operation_none.
               l_node->set_data_row( wa_row ).
             ENDIF.
 
@@ -5080,13 +4909,13 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
           IF VALUE #( mt_installed_modules[ tla = l_tla ] OPTIONAL ) IS NOT INITIAL.
             wa_row-op_text = 'Will be deleted.' ##NO_TEXT.
             wa_row-op_icon = '@0A@'.
-            wa_row-op_code = c_operation_delete.
+            wa_row-op_code = lif_ui_constants=>c_operation_delete.
             l_node->set_data_row( wa_row ).
 
           ELSE.
             wa_row-op_text = 'Will NOT be installed.' ##NO_TEXT.
             wa_row-op_icon = '@EB@'.
-            wa_row-op_code = c_operation_none.
+            wa_row-op_code = lif_ui_constants=>c_operation_none.
             l_node->set_data_row( wa_row ).
 
           ENDIF.
