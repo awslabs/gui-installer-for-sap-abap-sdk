@@ -1595,12 +1595,15 @@ CLASS lcl_sdk_zipfile_collection DEFINITION FINAL.
                         RETURNING VALUE(r_zipfile) TYPE REF TO lcl_sdk_zipfile,
       exists IMPORTING i_op            TYPE string
                        i_version       TYPE string
-             RETURNING VALUE(r_result) TYPE abap_bool,
-      update_zipfile_paths IMPORTING i_file_manager TYPE REF TO lcl_sdk_file_manager.
+             RETURNING VALUE(r_result) TYPE abap_bool.
+
 
 
   PRIVATE SECTION.
     DATA: mt_sdk_zipfiles TYPE tt_sdk_zipfile.
+
+    METHODS:
+      clear_missing_zipfile_paths IMPORTING i_file_manager TYPE REF TO lcl_sdk_file_manager.
 
 ENDCLASS.
 
@@ -1643,7 +1646,8 @@ CLASS lcl_sdk_zipfile_collection IMPLEMENTATION.
     " returns unbound r_zipfile if no zipfile matches op and version
   ENDMETHOD.
 
-  METHOD update_zipfile_paths.
+  " TODO: Currently not being used. Kept for future implementation of a mgmt dialog for zipfiles on disk
+  METHOD clear_missing_zipfile_paths.
 
     DATA(zipfile_available) = abap_false.
 
@@ -1651,9 +1655,7 @@ CLASS lcl_sdk_zipfile_collection IMPLEMENTATION.
 
       zipfile_available = i_file_manager->lif_sdk_file_manager~check_file_exists_at( i_path = wa_zipfile->path ).
 
-      IF zipfile_available = abap_true.
-        CONTINUE.
-      ELSE.
+      IF zipfile_available = abap_false.
         wa_zipfile->set_path( i_path = '' ).
       ENDIF.
 
