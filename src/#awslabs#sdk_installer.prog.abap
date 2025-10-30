@@ -542,8 +542,7 @@ INTERFACE lif_sdk_certificate_manager.
 
   METHODS:
 
-    install_amazon_root_certs IMPORTING i_internet_manager TYPE REF TO lif_sdk_internet_manager
-                        RETURNING VALUE(r_success) TYPE abap_bool RAISING lcx_error.
+    install_amazon_root_certs RETURNING VALUE(r_success) TYPE abap_bool RAISING lcx_error.
 
 ENDINTERFACE.
 
@@ -559,7 +558,7 @@ CLASS lcl_sdk_certificate_manager DEFINITION FINAL.
 
 
   PRIVATE SECTION.
-    DATA: internet_manager TYPE REF TO lif_sdk_internet_manager.    "TODO: REMOVE at some point
+    DATA: internet_manager TYPE REF TO lif_sdk_internet_manager.
     DATA: mt_amazon_root_certs TYPE lif_sdk_certificate_manager~tt_amazon_root_certificate. " populated in set_amazon_root_cert_values
 
     METHODS:
@@ -637,7 +636,7 @@ CLASS lcl_sdk_certificate_manager IMPLEMENTATION.
       ENDIF.
 
       IF lv_answer = 1.
-        lif_sdk_certificate_manager~install_amazon_root_certs( i_internet_manager = internet_manager ).
+        lif_sdk_certificate_manager~install_amazon_root_certs( ).
       ELSE.
         LEAVE PROGRAM.
       ENDIF.
@@ -848,6 +847,20 @@ ENDCLASS.
 
 INTERFACE lif_sdk_file_manager.
 
+  METHODS:
+    get_file_from_zip IMPORTING i_zipfile_absolute_path TYPE string
+                                i_file_to_retrieve      TYPE string
+                      RETURNING VALUE(r_file_xstring)   TYPE xstring,
+    check_file_writable_at IMPORTING i_path          TYPE string
+                           RETURNING VALUE(r_result) TYPE abap_bool,
+    check_file_exists_at IMPORTING i_path          TYPE string
+                         RETURNING VALUE(r_result) TYPE abap_bool,
+    open_for_input
+      IMPORTING iv_filename TYPE clike
+      RAISING   lcx_error,
+    open_for_output
+      IMPORTING iv_filename TYPE clike
+      RAISING   lcx_error.
 
 ENDINTERFACE.
 
@@ -857,31 +870,14 @@ CLASS lcl_sdk_file_manager DEFINITION FINAL.
     INTERFACES:
       lif_sdk_file_manager.
 
-    METHODS:
-      get_file_from_zip IMPORTING i_zipfile_absolute_path TYPE string
-                                  i_file_to_retrieve      TYPE string
-                        RETURNING VALUE(r_file_xstring)   TYPE xstring,
-      check_file_writable_at IMPORTING i_path          TYPE string
-                             RETURNING VALUE(r_result) TYPE abap_bool,
-      check_file_exists_at IMPORTING i_path          TYPE string
-                           RETURNING VALUE(r_result) TYPE abap_bool,
-      open_for_input
-        IMPORTING iv_filename TYPE clike
-        RAISING   lcx_error,
-      open_for_output
-        IMPORTING iv_filename TYPE clike
-        RAISING   lcx_error.
-
-  PRIVATE SECTION.
-
 ENDCLASS.
 
 CLASS lcl_sdk_file_manager IMPLEMENTATION.
 
-  METHOD get_file_from_zip.
+  METHOD lif_sdk_file_manager~get_file_from_zip.
     DATA lv_zipfile_content TYPE xstring.
     TRY.
-        open_for_input( i_zipfile_absolute_path ).
+        lif_sdk_file_manager~open_for_input( i_zipfile_absolute_path ).
         READ DATASET i_zipfile_absolute_path INTO lv_zipfile_content.
         CLOSE DATASET i_zipfile_absolute_path.
       CATCH cx_sy_file_authority INTO DATA(r_ex1).
@@ -921,9 +917,9 @@ CLASS lcl_sdk_file_manager IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD check_file_writable_at.
+  METHOD lif_sdk_file_manager~check_file_writable_at.
     TRY.
-        open_for_output( i_path ).
+        lif_sdk_file_manager~open_for_output( i_path ).
         CLOSE DATASET i_path.
         r_result = abap_true.
       CATCH lcx_error INTO DATA(lo_ex).
@@ -932,7 +928,7 @@ CLASS lcl_sdk_file_manager IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD check_file_exists_at.
+  METHOD lif_sdk_file_manager~check_file_exists_at.
 
     DATA(lv_path) = CONV pfebackuppro( i_path ).
     CALL FUNCTION 'PFL_CHECK_OS_FILE_EXISTENCE'
@@ -956,7 +952,7 @@ CLASS lcl_sdk_file_manager IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD open_for_input.
+  METHOD lif_sdk_file_manager~open_for_input.
     DATA lv_os_msg TYPE text255.
     OPEN DATASET iv_filename FOR INPUT IN BINARY MODE MESSAGE lv_os_msg.
     IF sy-subrc <> 0.
@@ -967,7 +963,7 @@ CLASS lcl_sdk_file_manager IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD open_for_output.
+  METHOD lif_sdk_file_manager~open_for_output.
     DATA(lv_filename_to_check) = CONV fileextern( iv_filename ).
     AUTHORITY-CHECK OBJECT 'S_DATASET'
       ID 'PROGRAM' FIELD sy-repid
@@ -1126,11 +1122,11 @@ CLASS lcl_sdk_transport_manager IMPLEMENTATION.
 
 
     TRY.
-        file_manager->open_for_output( lv_filepath_cofile ).
+        file_manager->lif_sdk_file_manager~open_for_output( lv_filepath_cofile ).
         TRANSFER i_cofile_blob TO lv_filepath_cofile.
         CLOSE DATASET lv_filepath_cofile.
 
-        file_manager->open_for_output( lv_filepath_datafile ).
+        file_manager->lif_sdk_file_manager~open_for_output( lv_filepath_datafile ).
         TRANSFER i_datafile_blob TO lv_filepath_datafile.
         CLOSE DATASET lv_filepath_datafile.
       CATCH cx_sy_file_authority INTO DATA(r_ex1).
@@ -1159,8 +1155,8 @@ CLASS lcl_sdk_transport_manager IMPLEMENTATION.
 
     l_cofile_zip_path = lif_sdk_constants=>c_transports_zip_path && i_tla && '/' && e_cofile_name.
 
-    e_cofile_blob = file_manager->get_file_from_zip( i_zipfile_absolute_path = i_zipfile_absolute_path
-                                                     i_file_to_retrieve      = l_cofile_zip_path ).
+    e_cofile_blob = file_manager->lif_sdk_file_manager~get_file_from_zip( i_zipfile_absolute_path = i_zipfile_absolute_path
+                                                                          i_file_to_retrieve      = l_cofile_zip_path ).
 
   ENDMETHOD.
 
@@ -1176,8 +1172,8 @@ CLASS lcl_sdk_transport_manager IMPLEMENTATION.
 
     l_datafile_zip_path = lif_sdk_constants=>c_transports_zip_path && i_tla && '/' && e_datafile_name.
 
-    e_datafile_blob = file_manager->get_file_from_zip( i_zipfile_absolute_path = i_zipfile_absolute_path
-                                                       i_file_to_retrieve      = l_datafile_zip_path ).
+    e_datafile_blob = file_manager->lif_sdk_file_manager~get_file_from_zip( i_zipfile_absolute_path = i_zipfile_absolute_path
+                                                                            i_file_to_retrieve      = l_datafile_zip_path ).
 
 
   ENDMETHOD.
@@ -1653,7 +1649,7 @@ CLASS lcl_sdk_zipfile_collection IMPLEMENTATION.
 
     LOOP AT mt_sdk_zipfiles INTO DATA(wa_zipfile).
 
-      zipfile_available = i_file_manager->check_file_exists_at( i_path = wa_zipfile->path ).
+      zipfile_available = i_file_manager->lif_sdk_file_manager~check_file_exists_at( i_path = wa_zipfile->path ).
 
       IF zipfile_available = abap_true.
         CONTINUE.
@@ -1688,7 +1684,7 @@ CLASS lcl_sdk_package_manager DEFINITION FINAL.
 
     DATA: internet_manager TYPE REF TO lif_sdk_internet_manager READ-ONLY.
     DATA: certificate_manager TYPE REF TO lif_sdk_certificate_manager READ-ONLY.
-    DATA: file_manager TYPE REF TO lcl_sdk_file_manager  READ-ONLY. " TODO: Fix class so the interface can be used instead
+    DATA: file_manager TYPE REF TO lif_sdk_file_manager  READ-ONLY.
     DATA: transport_manager TYPE REF TO lif_sdk_transport_manager  READ-ONLY.
     DATA: job_manager TYPE REF TO lif_sdk_job_manager  READ-ONLY.
 
@@ -1767,7 +1763,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
     IF i_certificate_manager IS BOUND.
       certificate_manager = i_certificate_manager.
     ELSE.
-      certificate_manager = NEW lcl_sdk_certificate_manager( ).
+      certificate_manager = NEW lcl_sdk_certificate_manager( i_internet_manager = internet_manager ).
     ENDIF.
 
     IF i_file_manager IS BOUND.
@@ -4744,7 +4740,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
           WHEN 'DOW_CERT'.
 
-            mr_sdk_package_manager->certificate_manager->install_amazon_root_certs( i_internet_manager = mr_sdk_package_manager->internet_manager ).
+            mr_sdk_package_manager->certificate_manager->install_amazon_root_certs( ).
 
           WHEN 'DOW_TRAK'.
 
