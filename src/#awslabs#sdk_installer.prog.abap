@@ -33,6 +33,7 @@ INTERFACE lif_sdk_transport_manager DEFERRED.
 INTERFACE lif_sdk_job_manager DEFERRED.
 
 INTERFACE lif_ui_constants DEFERRED.
+INTERFACE lif_ui_command DEFERRED.
 
 CLASS lcl_sdk_zipfile DEFINITION DEFERRED.
 CLASS lcl_sdk_zipfile_collection DEFINITION DEFERRED.
@@ -47,6 +48,19 @@ CLASS lcl_sdk_job_manager DEFINITION DEFERRED.
 CLASS lcl_sdk_package_manager DEFINITION DEFERRED.
 
 CLASS lcl_ui_tree_controller DEFINITION DEFERRED.
+CLASS lcl_ui_command_factory DEFINITION DEFERRED.
+CLASS lcl_ui_command_base DEFINITION DEFERRED.
+"CLASS lcl_ui_command_exe_dia DEFINITION DEFERRED.
+"CLASS lcl_ui_command_exe_btc DEFINITION DEFERRED.
+"CLASS lcl_ui_command_ins_dia DEFINITION DEFERRED.
+"CLASS lcl_ui_command_ins_btc DEFINITION DEFERRED.
+"CLASS lcl_ui_command_del_dia DEFINITION DEFERRED.
+"CLASS lcl_ui_command_del_btc DEFINITION DEFERRED.
+"CLASS lcl_ui_command_ins_all DEFINITION DEFERRED.
+"class lcl_ui_command_dow_crt DEFINITION DEFERRED.
+"class lcl_ui_command_dow_zip DEFINITION DEFERRED.
+CLASS lcl_ui_command_ref_ctl DEFINITION DEFERRED.
+"class lcl_ui_command_btc_dtl DEFINITION DEFERRED.
 
 CLASS lcl_utils DEFINITION DEFERRED.
 CLASS lcx_error DEFINITION DEFERRED.
@@ -3010,6 +3024,445 @@ CLASS lcl_ui_tree_controller DEFINITION FINAL.
 ENDCLASS.
 
 
+INTERFACE lif_ui_command.
+  METHODS:
+    execute IMPORTING i_tree_controller TYPE REF TO lcl_ui_tree_controller
+            RAISING   lcx_error,
+    can_execute IMPORTING i_tree_controller TYPE REF TO lcl_ui_tree_controller
+                RETURNING VALUE(r_result)   TYPE abap_bool
+                RAISING   lcx_error.
+ENDINTERFACE.
+
+
+CLASS lcl_ui_command_base DEFINITION ABSTRACT.
+  PUBLIC SECTION.
+    INTERFACES:
+      lif_ui_command.
+
+    DATA:
+  tree_controller TYPE REF TO lcl_ui_tree_controller.
+
+    METHODS:
+      constructor IMPORTING i_tree_controller TYPE REF TO lcl_ui_tree_controller.
+
+  PROTECTED SECTION.
+    METHODS:
+      get_target_version RETURNING VALUE(r_version)  TYPE string ,
+      validation_selection RETURNING VALUE(r_result) TYPE abap_bool
+                           RAISING   lcx_error,
+      check_selection_sanity IMPORTING it_modules_tbi  TYPE tt_sdk_tla
+                                       it_modules_tbd  TYPE tt_sdk_tla
+                                       i_op            TYPE string
+                                       i_salv_function TYPE syst_ucomm
+                             RETURNING VALUE(r_result) TYPE abap_bool
+                             RAISING   lcx_error,
+      check_selection_mod_thresholds IMPORTING it_modules_tbi  TYPE tt_sdk_tla
+                                               it_modules_tbd  TYPE tt_sdk_tla
+                                               i_op            TYPE string
+                                               i_salv_function TYPE syst_ucomm
+                                     RETURNING VALUE(r_result) TYPE abap_bool
+                                     RAISING   lcx_error,
+      check_selection_core_validity IMPORTING it_modules_tbi  TYPE tt_sdk_tla
+                                              it_modules_tbd  TYPE tt_sdk_tla
+                                              i_op            TYPE string
+                                              i_salv_function TYPE syst_ucomm
+                                    RETURNING VALUE(r_result) TYPE abap_bool,
+      check_selection_populated IMPORTING it_modules_tbi  TYPE tt_sdk_tla
+                                          it_modules_tbd  TYPE tt_sdk_tla
+                                          i_op            TYPE string
+                                          i_salv_function TYPE syst_ucomm
+                                RETURNING VALUE(r_result) TYPE abap_bool.
+
+ENDCLASS.
+
+CLASS lcl_ui_command_base IMPLEMENTATION.
+
+  METHOD constructor.
+    tree_controller = i_tree_controller.
+  ENDMETHOD.
+
+  METHOD lif_ui_command~execute.
+    " Do nothing in base case.
+  ENDMETHOD.
+
+  METHOD lif_ui_command~can_execute.
+    r_result = abap_true.
+  ENDMETHOD.
+
+  METHOD get_target_version.
+    r_version = 'LATEST'.
+  ENDMETHOD.
+
+  METHOD validation_selection.
+
+  ENDMETHOD.
+
+  METHOD check_selection_mod_thresholds.
+
+    DATA lv_text TYPE string.
+    DATA lv_answer TYPE c.
+
+    CASE i_op.
+
+      WHEN 'install'.
+        DATA(lv_number_modules_inst) = lines( it_modules_tbi ).
+        DATA(lv_number_new_modules) = 0.
+        DATA(lv_number_modules_avail_inst) = lines( tree_controller->mt_available_modules_inst ).
+
+        " determine modules to be net newly installed
+        LOOP AT it_modules_tbi INTO DATA(wa_module_tbi).
+          IF ( wa_module_tbi-tla <> 'core' ) AND NOT line_exists( tree_controller->mt_installed_modules[ tla = wa_module_tbi-tla ] ).
+            lv_number_new_modules = lv_number_new_modules + 1.
+            lv_number_modules_inst = lv_number_modules_inst - 1.
+          ENDIF.
+
+          IF ( wa_module_tbi-tla = 'core' ) AND ( NOT tree_controller->is_core_installed( ) ).
+            lv_number_new_modules = lv_number_new_modules + 1.
+            lv_number_modules_inst = lv_number_modules_inst - 1.
+          ENDIF.
+
+        ENDLOOP.
+
+
+        IF ( lv_number_modules_inst + lv_number_new_modules ) >= lv_number_modules_avail_inst.
+          lv_text = |You have selected all { lv_number_modules_inst + lv_number_new_modules } modules available for installation. |
+                 && |Having all modules installed is discouraged and should only be done in demo systems. |
+                 && |Continue? | ##NO_TEXT.
+
+          CALL FUNCTION 'POPUP_TO_CONFIRM'
+            EXPORTING
+              titlebar              = ' '
+              diagnose_object       = ' '
+              text_question         = lv_text
+              text_button_1         = |Do it anyway|
+              icon_button_1         = ' '
+              text_button_2         = |Go back|
+              icon_button_2         = ' '
+              default_button        = '2'
+              display_cancel_button = ' '
+              userdefined_f1_help   = ' '
+              start_column          = 25
+              start_row             = 6
+              iv_quickinfo_button_1 = ' '
+              iv_quickinfo_button_2 = ' '
+            IMPORTING
+              answer                = lv_answer
+            EXCEPTIONS
+              text_not_found        = 1
+              OTHERS                = 2 ##NO_TEXT.
+          IF sy-subrc <> 0.
+            RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
+          ENDIF.
+
+          IF lv_answer = 1.
+            r_result = abap_true.
+          ELSE.
+            r_result = abap_false.
+            RETURN.
+          ENDIF.
+
+        ENDIF.
+
+        IF ( lv_number_new_modules > lif_ui_constants=>c_batch_rec_threshold OR lv_number_modules_inst > lif_ui_constants=>c_batch_rec_threshold )
+            AND ( i_salv_function = 'STRT' OR i_salv_function = 'EXE_FGND' OR i_salv_function = 'INS_FGND' ).
+          lv_text = |You have selected { lv_number_new_modules + lv_number_modules_inst } modules for installation (or update). |
+                 & |This can take a while (using batch mode is recommended). |
+                 & |Continue with foreground mode? | ##NO_TEXT.
+
+          CALL FUNCTION 'POPUP_TO_CONFIRM'
+            EXPORTING
+              titlebar              = ' '
+              diagnose_object       = ' '
+              text_question         = lv_text
+              text_button_1         = |Yes, please|
+              icon_button_1         = ' '
+              text_button_2         = |Go back|
+              icon_button_2         = ' '
+              default_button        = '2'
+              display_cancel_button = ' '
+              userdefined_f1_help   = ' '
+              start_column          = 25
+              start_row             = 6
+              iv_quickinfo_button_1 = ' '
+              iv_quickinfo_button_2 = ' '
+            IMPORTING
+              answer                = lv_answer
+            EXCEPTIONS
+              text_not_found        = 1
+              OTHERS                = 2 ##NO_TEXT.
+          IF sy-subrc <> 0.
+            RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
+          ENDIF.
+
+          IF lv_answer = 1.
+            r_result = abap_true.
+          ELSE.
+            r_result = abap_false.
+          ENDIF.
+
+        ELSE.
+          r_result = abap_true.
+        ENDIF.
+
+        RETURN.
+
+      WHEN 'uninstall'.
+
+        DATA(lv_number_modules_tbd) = lines( it_modules_tbd ).
+
+        IF lv_number_modules_tbd > lif_ui_constants=>c_batch_rec_threshold
+            AND ( i_salv_function = 'STRT' OR i_salv_function = 'EXE_FGND' OR i_salv_function = 'DEL_FGND' ).
+          lv_text = |You have selected { lv_number_modules_tbd } modules for deletion. |
+                         && |This can take a while (using batch mode is recommended). |
+                         && |Continue in foreground mode? | ##NO_TEXT.
+
+          CALL FUNCTION 'POPUP_TO_CONFIRM'
+            EXPORTING
+              titlebar              = ' '
+              diagnose_object       = ' '
+              text_question         = lv_text
+              text_button_1         = |Yes, please|
+              icon_button_1         = ' '
+              text_button_2         = |Go back|
+              icon_button_2         = ' '
+              default_button        = '2'
+              display_cancel_button = ' '
+              userdefined_f1_help   = ' '
+              start_column          = 25
+              start_row             = 6
+              iv_quickinfo_button_1 = ' '
+              iv_quickinfo_button_2 = ' '
+            IMPORTING
+              answer                = lv_answer
+            EXCEPTIONS
+              text_not_found        = 1
+              OTHERS                = 2 ##NO_TEXT.
+          IF sy-subrc <> 0.
+            RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
+          ENDIF.
+
+          IF lv_answer = 1.
+            r_result = abap_true.
+          ELSE.
+            r_result = abap_false.
+          ENDIF.
+
+        ELSE.
+          r_result = abap_true.
+        ENDIF.
+
+        RETURN.
+      WHEN OTHERS.
+
+    ENDCASE.
+
+  ENDMETHOD.
+
+  METHOD check_selection_core_validity.
+
+    DATA: lv_result TYPE abap_bool VALUE abap_false.
+
+    CASE i_op.
+
+      WHEN 'install'.
+
+        IF tree_controller->is_core_installed( ) = abap_false                            " core is NOT installed
+          AND NOT line_exists( it_modules_tbi[ tla = 'core' ] )  " and NOT selected for installation
+          AND lines( it_modules_tbi ) > 0.                              " are other modules selected for installation?
+          MESSAGE |Please install core module with first deployment.| TYPE 'S' DISPLAY LIKE 'E' ##NO_TEXT.
+          lv_result = abap_false.                                       " then block the request
+
+        ELSEIF tree_controller->is_core_installed( ) = abap_true                         " core is installed
+            AND line_exists( it_modules_tbd[ tla = 'core' ] )    " and marked for deletion
+            AND ( lines( it_modules_tbd ) < lines( tree_controller->mt_installed_modules ) - 3    " are any installed modules NOT selected for deletion?
+            OR lines( it_modules_tbi ) > 0 ).                                   " or did the user select additional modules for installation?
+          MESSAGE |To delete core, additionally mark all installed modules for deletion.| TYPE 'S' DISPLAY LIKE 'E' ##NO_TEXT.
+          lv_result = abap_false.                                       " then block the request
+
+        ELSE.
+          lv_result = abap_true.
+        ENDIF.
+
+      WHEN 'uninstall'.
+
+        IF tree_controller->is_core_installed( ) = abap_true                           " core is installed
+            AND line_exists( it_modules_tbd[ tla = 'core' ] )  " and marked for deletion
+            AND ( lines( it_modules_tbd ) < lines( tree_controller->mt_installed_modules ) - 3 " are any installed modules NOT selected for deletion?
+            OR lines( it_modules_tbi ) > 0 ).                                " or did the user select additional modules for installation?
+          MESSAGE |To delete core, additionally mark all installed modules for deletion.| TYPE 'S' DISPLAY LIKE 'E' ##NO_TEXT.
+          lv_result = abap_false.                                           " then block the request
+        ELSE.
+          lv_result = abap_true.
+        ENDIF.
+
+    ENDCASE.
+
+    r_result = lv_result.
+
+  ENDMETHOD.
+
+
+  METHOD check_selection_populated.
+
+    DATA: lv_result TYPE abap_bool VALUE abap_false.
+
+    CASE i_op.
+
+      WHEN 'install'.
+
+        IF lines( it_modules_tbi ) + lines( it_modules_tbd ) > 0.
+          lv_result = abap_true.
+        ELSE.
+          MESSAGE |Nothing to do.| TYPE 'S' ##NO_TEXT.
+          lv_result = abap_false.
+        ENDIF.
+
+      WHEN 'uninstall'.
+
+        IF lines( it_modules_tbd ) > 0.
+          lv_result = abap_true.
+        ELSE.
+          MESSAGE |Nothing to do.| TYPE 'S' ##NO_TEXT.
+          lv_result = abap_false.
+        ENDIF.
+
+    ENDCASE.
+
+    r_result = lv_result.
+
+  ENDMETHOD.
+
+
+  METHOD check_selection_sanity.
+
+    DATA: lv_result_populated TYPE abap_bool VALUE abap_false.
+    DATA: lv_result_core_validity TYPE abap_bool VALUE abap_false.
+    DATA: lv_result_mod_thresholds TYPE abap_bool VALUE abap_false.
+
+    lv_result_populated = check_selection_populated( it_modules_tbi  = it_modules_tbi
+                                                     it_modules_tbd  = it_modules_tbd
+                                                     i_op            = i_op
+                                                     i_salv_function = i_salv_function ).
+
+    IF lv_result_populated = abap_false.
+      r_result = abap_false.
+      RETURN.
+    ENDIF.
+
+    lv_result_core_validity = check_selection_core_validity( it_modules_tbi  = it_modules_tbi
+                                                             it_modules_tbd  = it_modules_tbd
+                                                             i_op            = i_op
+                                                             i_salv_function = i_salv_function ).
+
+    IF lv_result_core_validity = abap_false.
+      r_result = abap_false.
+      RETURN.
+    ENDIF.
+
+    lv_result_mod_thresholds = check_selection_mod_thresholds( it_modules_tbi  = it_modules_tbi
+                                                               it_modules_tbd  = it_modules_tbd
+                                                               i_op            = i_op
+                                                               i_salv_function = i_salv_function ).
+
+    IF lv_result_mod_thresholds = abap_false.
+      r_result = abap_false.
+      RETURN.
+    ENDIF.
+
+
+    r_result = abap_true.
+
+
+  ENDMETHOD.
+
+ENDCLASS.
+
+
+CLASS lcl_ui_command_ref_ctl DEFINITION INHERITING FROM lcl_ui_command_base FINAL.
+
+  PUBLIC SECTION.
+    METHODS:
+      lif_ui_command~execute REDEFINITION,
+      lif_ui_command~can_execute REDEFINITION.
+
+ENDCLASS.
+
+
+CLASS lcl_ui_command_ref_ctl IMPLEMENTATION.
+
+  METHOD lif_ui_command~execute.
+    tree_controller->refresh( ).
+  ENDMETHOD.
+
+  METHOD lif_ui_command~can_execute.
+    r_result = super->lif_ui_command~can_execute( i_tree_controller = tree_controller ).
+  ENDMETHOD.
+
+ENDCLASS.
+
+
+
+CLASS lcl_ui_command_factory DEFINITION FINAL.
+  PUBLIC SECTION.
+    CLASS-METHODS:
+      create_command IMPORTING i_function_code   TYPE syst_ucomm
+                               i_tree_controller TYPE REF TO lcl_ui_tree_controller
+                     RETURNING VALUE(r_command)  TYPE REF TO lif_ui_command
+                     RAISING   lcx_error.
+ENDCLASS.
+
+CLASS lcl_ui_command_factory IMPLEMENTATION.
+  METHOD create_command.
+
+    CASE i_function_code.
+      WHEN 'STRT' OR 'EXE_FGND'.
+
+      WHEN 'BTCH' OR 'EXE_BGND'.
+
+
+      WHEN 'INS_FGND'.
+
+
+
+      WHEN 'INS_BGND'.
+
+
+
+      WHEN 'DEL_FGND'.
+
+
+
+      WHEN 'DEL_BGND'.
+
+
+      WHEN 'UPD_INST'.
+
+
+      WHEN 'DES_INST'.
+
+
+      WHEN 'REF_TREE'.
+        r_command = NEW lcl_ui_command_ref_ctl( i_tree_controller = i_tree_controller ).
+
+      WHEN 'BTC_DTLS'.
+
+
+      WHEN 'DOW_CERT'.
+
+
+      WHEN 'DOW_TRAK'.
+
+
+      WHEN 'INS_ALL'.
+
+
+      WHEN OTHERS.
+
+    ENDCASE.
+
+  ENDMETHOD.
+ENDCLASS.
+
 
 CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
@@ -4955,7 +5408,13 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
           WHEN 'REF_TREE'.
 
-            refresh( ).
+            DATA(refresh_command) = lcl_ui_command_factory=>create_command( i_function_code   = e_salv_function
+                                                                            i_tree_controller = me ).
+
+            IF refresh_command->can_execute( i_tree_controller = me ).
+              refresh_command->execute( i_tree_controller = me ).
+            ENDIF.
+
 
           WHEN 'BTC_DTLS'.
 
