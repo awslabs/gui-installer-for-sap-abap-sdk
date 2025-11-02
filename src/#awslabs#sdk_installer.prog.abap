@@ -46,6 +46,7 @@ CLASS lcl_sdk_file_manager DEFINITION DEFERRED.
 CLASS lcl_sdk_transport_manager DEFINITION DEFERRED.
 CLASS lcl_sdk_job_manager DEFINITION DEFERRED.
 CLASS lcl_sdk_package_manager DEFINITION DEFERRED.
+CLASS lcl_sdk_utils DEFINITION DEFERRED.
 
 CLASS lcl_ui_tree_controller DEFINITION DEFERRED.
 CLASS lcl_ui_command_factory DEFINITION DEFERRED.
@@ -60,9 +61,9 @@ CLASS lcl_ui_command_base DEFINITION DEFERRED.
 "class lcl_ui_command_dow_crt DEFINITION DEFERRED.
 "class lcl_ui_command_dow_zip DEFINITION DEFERRED.
 CLASS lcl_ui_command_ref_ctl DEFINITION DEFERRED.
-"class lcl_ui_command_btc_dtl DEFINITION DEFERRED.
+CLASS lcl_ui_command_btc_dtl DEFINITION DEFERRED.
+CLASS lcl_ui_utils DEFINITION DEFERRED.
 
-CLASS lcl_utils DEFINITION DEFERRED.
 CLASS lcx_error DEFINITION DEFERRED.
 CLASS lcl_main DEFINITION DEFERRED.
 
@@ -150,7 +151,7 @@ CLASS lcx_error IMPLEMENTATION.
 
 ENDCLASS.
 
-CLASS lcl_utils DEFINITION FINAL.
+CLASS lcl_sdk_utils DEFINITION FINAL.
 
   PUBLIC SECTION.
 
@@ -174,7 +175,7 @@ CLASS lcl_utils DEFINITION FINAL.
 ENDCLASS.
 
 
-CLASS lcl_utils IMPLEMENTATION.
+CLASS lcl_sdk_utils IMPLEMENTATION.
 
 
   METHOD cmp_version_string.
@@ -1085,7 +1086,7 @@ CLASS lcl_sdk_transport_manager IMPLEMENTATION.
         file_system_not_found      = 4
         OTHERS                     = 5.
     IF sy-subrc <> 0.
-      lcl_utils=>raise_lpath_exception( i_cofile_name ).
+      lcl_sdk_utils=>raise_lpath_exception( i_cofile_name ).
     ENDIF.
 
 
@@ -1120,7 +1121,7 @@ CLASS lcl_sdk_transport_manager IMPLEMENTATION.
         file_system_not_found      = 4
         OTHERS                     = 5.
     IF sy-subrc <> 0.
-      lcl_utils=>raise_lpath_exception( i_datafile_name ).
+      lcl_sdk_utils=>raise_lpath_exception( i_datafile_name ).
     ENDIF.
 
     CALL FUNCTION 'FILE_VALIDATE_NAME'
@@ -1202,7 +1203,7 @@ CLASS lcl_sdk_transport_manager IMPLEMENTATION.
     DATA: l_tp_ret_code TYPE stpa-retcode.
     DATA: ls_exception TYPE stmscalert.
 
-    l_system = lcl_utils=>get_system_name( ).
+    l_system = lcl_sdk_utils=>get_system_name( ).
 
     " TODO: Needs to go into its own method
     CALL FUNCTION 'TMS_MGR_FORWARD_TR_REQUEST'
@@ -1568,7 +1569,7 @@ CLASS lcl_sdk_zipfile IMPLEMENTATION.
         file_system_not_found      = 4
         OTHERS                     = 5.
     IF sy-subrc <> 0.
-      lcl_utils=>raise_lpath_exception( i_zipfile_name ).
+      lcl_sdk_utils=>raise_lpath_exception( i_zipfile_name ).
     ENDIF.
 
   ENDMETHOD.
@@ -2068,6 +2069,8 @@ CLASS lcl_sdk_package_manager DEFINITION FINAL.
                                     it_modules_to_be_deleted   TYPE tt_sdk_tla
                           RETURNING VALUE(r_jobnumber)         TYPE btcjobcnt
                           RAISING   lcx_error,
+      is_deprecated IMPORTING i_tla           TYPE lcl_sdk_module=>t_tla
+                    RETURNING VALUE(r_result) TYPE abap_bool,
       get_sdk_installed_modules RETURNING VALUE(r_installed_modules) TYPE tt_sdk_module
                                 RAISING   lcx_error,
       get_sdk_deprecated_mod_inst RETURNING VALUE(r_deprecated_modules) TYPE tt_sdk_module,
@@ -2104,7 +2107,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
 
   METHOD constructor.
 
-    IF lcl_utils=>has_prod_client( ).
+    IF lcl_sdk_utils=>has_prod_client( ).
       MESSAGE |System has at least one productive client, please use TMS.| TYPE 'A' ##NO_TEXT.
     ENDIF.
 
@@ -2166,6 +2169,12 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD is_deprecated.
+    DATA(deprecated_modules) = get_sdk_deprecated_mod_inst( ).
+    r_result = xsdbool( line_exists( deprecated_modules[ tla = i_tla ] ) ).
+  ENDMETHOD.
+
+
   METHOD install_all_modules.
 
     DATA: lt_modules_to_be_installed TYPE tt_sdk_tla.
@@ -2216,9 +2225,9 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
                                                                 i_source    = 'zip'
                                                                 i_version   = 'LATEST' ).
 
-    IF lcl_utils=>cmp_version_string( i_string1 = i_avers_core_inst
+    IF lcl_sdk_utils=>cmp_version_string( i_string1 = i_avers_core_inst
                                       i_string2 = lt_mod_avail_inst_zip[ tla = 'core' ]-avers ) = 1
-        OR lcl_utils=>cmp_version_string( i_string1 = i_avers_core_uninst
+        OR lcl_sdk_utils=>cmp_version_string( i_string1 = i_avers_core_uninst
                                           i_string2 = lt_mod_avail_uninst_zip[ tla = 'core' ]-avers ) = 1.
       MESSAGE 'One or more ABAP SDK zipfiles not current. Downloading new version now.' TYPE 'I' ##NO_TEXT.
       TRY.
@@ -2302,7 +2311,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
           lt_irt_requests TYPE STANDARD TABLE OF ctrs_requ.
 
 
-    l_system = lcl_utils=>get_system_name( ).
+    l_system = lcl_sdk_utils=>get_system_name( ).
 
     CALL FUNCTION 'TMS_TM_GET_TRLIST'
       EXPORTING
@@ -2914,6 +2923,105 @@ ENDCLASS.
 
 
 
+CLASS lcl_ui_utils DEFINITION FINAL.
+  PUBLIC SECTION.
+    CLASS-METHODS:
+      get_running_jobs_message IMPORTING i_job_manager    TYPE REF TO lif_sdk_job_manager
+                               RETURNING VALUE(r_message) TYPE string,
+      display_job_details_statusbar IMPORTING i_job_manager    TYPE REF TO lif_sdk_job_manager,
+      is_fullscreen IMPORTING i_container     TYPE REF TO cl_gui_container
+                    RETURNING VALUE(r_result) TYPE abap_bool,
+      is_sapgui_html RETURNING VALUE(r_result) TYPE abap_bool,
+      is_sapgui_timeout_sufficient RETURNING VALUE(r_result) TYPE abap_bool
+                                   RAISING   lcx_error.
+ENDCLASS.
+
+CLASS lcl_ui_utils IMPLEMENTATION.
+
+  METHOD get_running_jobs_message.
+
+    DATA: lt_joblist TYPE tbtcjob_tt.
+    lt_joblist = i_job_manager->get_running_jobs( i_jobname = sy-repid ).
+    DATA wa_job TYPE tbtcjob.
+    READ TABLE lt_joblist INTO wa_job INDEX 1.
+    IF sy-subrc <> 0.
+      MESSAGE |Expected to find exactly one job matching { sy-repid } but found { lines( lt_joblist ) }| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
+    ENDIF.
+    DATA l_job_message TYPE string.
+    CONCATENATE `Import background job currently running with number` wa_job-jobcount INTO r_message SEPARATED BY ' ' ##NO_TEXT.
+
+  ENDMETHOD.
+
+
+  METHOD display_job_details_statusbar.
+
+    " Job already running?
+    IF i_job_manager->is_job_running( ).
+
+      MESSAGE get_running_jobs_message( i_job_manager = i_job_manager ) TYPE 'S' DISPLAY LIKE 'W'.
+
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD is_fullscreen.
+
+    DATA lr_gui_container TYPE REF TO cl_gui_container.
+
+    IF i_container IS NOT INITIAL.
+      lr_gui_container = i_container.
+    ELSE.
+      lr_gui_container = CAST #( cl_gui_container=>screen0->children[ 1 ] ).
+    ENDIF.
+
+    IF lr_gui_container->get_name( ) = 'TREE_CONTAINER'.
+      r_result = abap_true.
+    ELSE.
+      r_result = abap_false.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD is_sapgui_html.
+
+    DATA: lv_result TYPE abap_bool VALUE abap_false.
+
+    CALL FUNCTION 'GUI_IS_ITS'
+      IMPORTING
+        return = lv_result.
+
+    r_result = lv_result.
+
+  ENDMETHOD.
+
+  METHOD is_sapgui_timeout_sufficient.
+
+    DATA: lv_gui_auto_timeout TYPE spfpflpar-pvalue VALUE '0'.
+    DATA: lv_result TYPE abap_bool VALUE abap_false.
+
+    CALL FUNCTION 'RSAN_SYSTEM_PARAMETER_READ'
+      EXPORTING
+        i_name     = 'rdisp/gui_auto_logout'
+      IMPORTING
+        e_value    = lv_gui_auto_timeout
+      EXCEPTIONS
+        read_error = 1
+        OTHERS     = 2.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
+    ENDIF.
+
+    IF lv_gui_auto_timeout > lif_ui_constants=>c_sapgui_autologout_threshold.
+      lv_result = abap_true.
+    ENDIF.
+
+    r_result = lv_result.
+
+  ENDMETHOD.
+ENDCLASS.
+
+
+
 CLASS lcl_ui_tree_controller DEFINITION FINAL.
   PUBLIC SECTION.
 
@@ -2962,15 +3070,9 @@ CLASS lcl_ui_tree_controller DEFINITION FINAL.
       save_node_key IMPORTING ir_node_name TYPE string
                               ir_node_key  TYPE salv_de_node_key,
       is_core_installed RETURNING VALUE(r_result) TYPE abap_bool,
-      is_fullscreen RETURNING VALUE(r_result) TYPE abap_bool,
-      is_sapgui_html RETURNING VALUE(r_result) TYPE abap_bool,
-      is_sapgui_timeout_sufficient RETURNING VALUE(r_result) TYPE abap_bool
-                                   RAISING   lcx_error,
       is_version_latest IMPORTING i_version       TYPE string
                         RETURNING VALUE(r_result) TYPE abap_bool,
       toggle_inst_modules IMPORTING i_checked TYPE abap_bool,
-      display_job_details,
-      display_job_details_statusbar,
       fill_fullscreen_content,
       create_container,
       create_fullscreen,
@@ -3040,7 +3142,7 @@ CLASS lcl_ui_command_base DEFINITION ABSTRACT.
       lif_ui_command.
 
     DATA:
-  tree_controller TYPE REF TO lcl_ui_tree_controller.
+      tree_controller TYPE REF TO lcl_ui_tree_controller.
 
     METHODS:
       constructor IMPORTING i_tree_controller TYPE REF TO lcl_ui_tree_controller.
@@ -3379,17 +3481,14 @@ ENDCLASS.
 
 
 CLASS lcl_ui_command_ref_ctl DEFINITION INHERITING FROM lcl_ui_command_base FINAL.
-
   PUBLIC SECTION.
     METHODS:
       lif_ui_command~execute REDEFINITION,
       lif_ui_command~can_execute REDEFINITION.
-
 ENDCLASS.
 
 
 CLASS lcl_ui_command_ref_ctl IMPLEMENTATION.
-
   METHOD lif_ui_command~execute.
     tree_controller->refresh( ).
   ENDMETHOD.
@@ -3397,9 +3496,30 @@ CLASS lcl_ui_command_ref_ctl IMPLEMENTATION.
   METHOD lif_ui_command~can_execute.
     r_result = super->lif_ui_command~can_execute( i_tree_controller = tree_controller ).
   ENDMETHOD.
-
 ENDCLASS.
 
+
+CLASS lcl_ui_command_btc_dtl DEFINITION INHERITING FROM lcl_ui_command_base FINAL.
+  PUBLIC SECTION.
+    METHODS:
+      lif_ui_command~execute REDEFINITION,
+      lif_ui_command~can_execute REDEFINITION.
+ENDCLASS.
+
+
+CLASS lcl_ui_command_btc_dtl IMPLEMENTATION.
+  METHOD lif_ui_command~execute.
+    MESSAGE lcl_ui_utils=>get_running_jobs_message( i_job_manager = i_tree_controller->mr_sdk_package_manager->job_manager ) TYPE 'I'.
+  ENDMETHOD.
+
+  METHOD lif_ui_command~can_execute.
+    IF tree_controller->mr_sdk_package_manager->job_manager->is_job_running( ).
+      r_result = abap_true.
+    ELSE.
+      MESSAGE 'No background job currently running.' TYPE 'I' ##NO_TEXT.
+    ENDIF.
+  ENDMETHOD.
+ENDCLASS.
 
 
 CLASS lcl_ui_command_factory DEFINITION FINAL.
@@ -3445,7 +3565,7 @@ CLASS lcl_ui_command_factory IMPLEMENTATION.
         r_command = NEW lcl_ui_command_ref_ctl( i_tree_controller = i_tree_controller ).
 
       WHEN 'BTC_DTLS'.
-
+        r_command = NEW lcl_ui_command_btc_dtl( i_tree_controller = i_tree_controller ).
 
       WHEN 'DOW_CERT'.
 
@@ -3489,34 +3609,6 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
     " re-hydrate the module staging area if report is restarted
     IMPORT st_modules_to_be_installed = mt_modules_to_be_installed FROM SHARED BUFFER indx(mi) ID 'MOD_INST'.
     IMPORT st_modules_to_be_deleted = mt_modules_to_be_deleted FROM SHARED BUFFER indx(md) ID 'MOD_DELE'.
-
-    " declare popular modules
-*    INSERT CONV ts_sdk_module-tla( 'agw' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'ath' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'bdr' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'cmt' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'cpd' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'cwl' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'cwt' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'evb' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'fcs' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'frh' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'gla' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'iot' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'kms' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'kns' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'rek' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'rsd' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'sgm' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'sns' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'sqs' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'ssm' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'tex' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'tnb' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'trl' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'trn' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'xl8' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
-*    INSERT CONV ts_sdk_module-tla( 'lmd' ) INTO TABLE me->mt_popular_modules ##NO_TEXT.
 
 
     IF m_fullscreen = abap_false.
@@ -3735,12 +3827,12 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
     IF wa_core_module-cvers IS NOT INITIAL.
 
-      IF lcl_utils=>cmp_version_string( i_string1 = mt_available_modules_inst[ tla = 'core' ]-avers
+      IF lcl_sdk_utils=>cmp_version_string( i_string1 = mt_available_modules_inst[ tla = 'core' ]-avers
                                                     i_string2 = wa_core_module-cvers ) = 0.
         wa_core_module-op_icon = '@08@'.
         wa_core_module-op_text = 'Module up to date, no operation planned.' ##NO_TEXT.
         wa_core_module-op_code = lif_ui_constants=>c_operation_none.
-      ELSEIF lcl_utils=>cmp_version_string( i_string1 = mt_available_modules_inst[ tla = 'core' ]-avers
+      ELSEIF lcl_sdk_utils=>cmp_version_string( i_string1 = mt_available_modules_inst[ tla = 'core' ]-avers
                                                         i_string2 = wa_core_module-cvers ) = 1.
         wa_core_module-op_icon = '@09@'.
         wa_core_module-op_text = 'Module will be updated.' ##NO_TEXT.
@@ -3914,12 +4006,12 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
         l_text = wa_installed_module-tla.
 
-        IF lcl_utils=>cmp_version_string( i_string1 = wa_installed_module-avers
+        IF lcl_sdk_utils=>cmp_version_string( i_string1 = wa_installed_module-avers
                                                       i_string2 = wa_installed_module-cvers ) = 0.
           wa_installed_module-op_icon = '@08@'.
           wa_installed_module-op_text = 'Module up to date, no operation planned.' ##NO_TEXT.
           wa_installed_module-op_code = lif_ui_constants=>c_operation_none.
-        ELSEIF lcl_utils=>cmp_version_string( i_string1 = wa_installed_module-avers
+        ELSEIF lcl_sdk_utils=>cmp_version_string( i_string1 = wa_installed_module-avers
                                                           i_string2 = wa_installed_module-cvers ) = 1.
           wa_installed_module-op_icon = '@09@'.
           wa_installed_module-op_text = 'Module will be updated.' ##NO_TEXT.
@@ -4216,7 +4308,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
       DATA lr_header_content TYPE REF TO cl_salv_form_header_info.
       DATA l_job_message TYPE string.
       CONCATENATE `Warning: Import background job currently running with number` wa_job-jobcount INTO l_job_message SEPARATED BY ' ' ##NO_TEXT.
-      IF is_fullscreen( ).
+      IF lcl_ui_utils=>is_fullscreen( i_container = mr_container ).
         lr_header_content = NEW #( text    = l_job_message
                                    tooltip = l_job_message ).
         mr_tree->set_top_of_list( lr_header_content ).
@@ -4232,7 +4324,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
   " Currently no footer planned
   METHOD draw_footer.
 
-    IF is_fullscreen( ).
+    IF lcl_ui_utils=>is_fullscreen( i_container = mr_container ).
       DATA l_message TYPE string.
 
       DATA lr_footer_content TYPE REF TO cl_salv_form_header_info.
@@ -4282,7 +4374,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
     MESSAGE |Refresh complete.| TYPE 'S' ##NO_TEXT.
 
     IF mr_sdk_package_manager->job_manager->is_job_running( ).
-      display_job_details_statusbar( ).
+      lcl_ui_utils=>display_job_details_statusbar( i_job_manager = mr_sdk_package_manager->job_manager ).
     ENDIF.
 
   ENDMETHOD.
@@ -4335,8 +4427,8 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
         ELSE. "if not, activate all the buttons
 
-          IF is_sapgui_html( ) = abap_false                   " if we're not in SAPGUI for HTML, AND
-            AND is_sapgui_timeout_sufficient( ) = abap_true.  " if we have a sufficiently large (900) auto logout value, foreground processing is enabled
+          IF lcl_ui_utils=>is_sapgui_html( ) = abap_false                   " if we're not in SAPGUI for HTML, AND
+            AND lcl_ui_utils=>is_sapgui_timeout_sufficient( ) = abap_true.  " if we have a sufficiently large (900) auto logout value, foreground processing is enabled
             lr_functions->enable_function( name    = 'EXE_FGND'
                                            boolean = 'X' ).
             lr_functions->enable_function( name    = 'INS_FGND'
@@ -4410,57 +4502,8 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
     lr_settings = mr_tree->get_tree_settings( ).
     lr_settings->set_hierarchy_header( 'Modules' ) ##NO_TEXT.
 
-    IF is_fullscreen( ).
+    IF lcl_ui_utils=>is_fullscreen( i_container = mr_container ).
       lr_settings->set_header( 'AWS ABAP SDK package control (fullscreen)' ) ##NO_TEXT.
-    ENDIF.
-
-  ENDMETHOD.
-
-
-  METHOD display_job_details_statusbar.
-
-    " Job already running?
-    IF mr_sdk_package_manager->job_manager->is_job_running( ).
-
-      " get job number
-      DATA: lt_joblist TYPE tbtcjob_tt.
-      lt_joblist = mr_sdk_package_manager->job_manager->get_running_jobs( i_jobname = sy-repid ).
-      DATA wa_job TYPE tbtcjob.
-      READ TABLE lt_joblist INTO wa_job INDEX 1.
-      IF sy-subrc <> 0.
-        MESSAGE |Expected to find exactly one job matching { sy-repid } but found { lines( lt_joblist ) }| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-      ENDIF.
-      DATA l_job_message TYPE string.
-      CONCATENATE `Import background job currently running with number` wa_job-jobcount INTO l_job_message SEPARATED BY ' ' ##NO_TEXT.
-
-      MESSAGE l_job_message TYPE 'S' DISPLAY LIKE 'W'.
-
-    ENDIF.
-
-  ENDMETHOD.
-
-
-  METHOD display_job_details.
-
-    " Job already running?
-    IF mr_sdk_package_manager->job_manager->is_job_running( ).
-
-      " get job number
-      DATA: lt_joblist TYPE tbtcjob_tt.
-      lt_joblist = mr_sdk_package_manager->job_manager->get_running_jobs( i_jobname = sy-repid ).
-      DATA wa_job TYPE tbtcjob.
-      READ TABLE lt_joblist INTO wa_job INDEX 1.
-      IF sy-subrc <> 0.
-        MESSAGE |Expected to find exactly one job matching { sy-repid } but found { lines( lt_joblist ) }| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-      ENDIF.
-
-      DATA l_job_message TYPE string.
-      CONCATENATE `Import background job currently running with number` wa_job-jobcount INTO l_job_message SEPARATED BY ' ' ##NO_TEXT.
-
-      MESSAGE l_job_message TYPE 'I'.
-    ELSE.
-      MESSAGE 'No background job currently running.' TYPE 'I' ##NO_TEXT.
-
     ENDIF.
 
   ENDMETHOD.
@@ -4653,63 +4696,6 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
     ENDIF.
 
   ENDMETHOD.
-
-
-  METHOD is_fullscreen.
-
-    DATA lr_gui_container TYPE REF TO cl_gui_container.
-
-    IF mr_container IS NOT INITIAL.
-      lr_gui_container = mr_container.
-    ELSE.
-      lr_gui_container = CAST #( cl_gui_container=>screen0->children[ 1 ] ).
-    ENDIF.
-
-    IF lr_gui_container->get_name( ) = 'TREE_CONTAINER'.
-      r_result = abap_true.
-    ELSE.
-      r_result = abap_false.
-    ENDIF.
-
-  ENDMETHOD.
-
-  METHOD is_sapgui_html.
-
-    DATA: lv_result TYPE abap_bool VALUE abap_false.
-
-    CALL FUNCTION 'GUI_IS_ITS'
-      IMPORTING
-        return = lv_result.
-
-    r_result = lv_result.
-
-  ENDMETHOD.
-
-  METHOD is_sapgui_timeout_sufficient.
-
-    DATA: lv_gui_auto_timeout TYPE spfpflpar-pvalue VALUE '0'.
-    DATA: lv_result TYPE abap_bool VALUE abap_false.
-
-    CALL FUNCTION 'RSAN_SYSTEM_PARAMETER_READ'
-      EXPORTING
-        i_name     = 'rdisp/gui_auto_logout'
-      IMPORTING
-        e_value    = lv_gui_auto_timeout
-      EXCEPTIONS
-        read_error = 1
-        OTHERS     = 2.
-    IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
-    ENDIF.
-
-    IF lv_gui_auto_timeout > lif_ui_constants=>c_sapgui_autologout_threshold.
-      lv_result = abap_true.
-    ENDIF.
-
-    r_result = lv_result.
-
-  ENDMETHOD.
-
 
   METHOD get_modules_to_be_installed.
     DATA lr_selections TYPE REF TO cl_salv_selections_tree.
@@ -5317,7 +5303,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
           WHEN 'DEL_FGND'.
 
             " we only use the same version as core (given it is installed at all)
-            " if the installed version of core is the NOT the latest version
+            " if the installed version of core is NOT the latest version
             IF is_core_installed( ) = abap_true.
               IF NOT is_version_latest( mt_installed_modules[ tla = 'sts' ]-cvers ).
                 lv_target_version = mt_installed_modules[ tla = 'sts' ]-cvers.
@@ -5357,7 +5343,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
           WHEN 'DEL_BGND'.
 
             " we only use the same version as core (given it is installed at all)
-            " if the installed version of core is the NOT the latest version
+            " if the installed version of core is  NOT the latest version
             IF is_core_installed( ) = abap_true.
               IF NOT is_version_latest( mt_installed_modules[ tla = 'sts' ]-cvers ).
                 lv_target_version = mt_installed_modules[ tla = 'sts' ]-cvers.
@@ -5418,7 +5404,12 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
           WHEN 'BTC_DTLS'.
 
-            display_job_details( ).
+            DATA(batch_detail_command) = lcl_ui_command_factory=>create_command( i_function_code   = e_salv_function
+                                                                                 i_tree_controller = me ).
+
+            IF batch_detail_command->can_execute( i_tree_controller = me ).
+              batch_detail_command->execute( i_tree_controller = me ).
+            ENDIF.
 
           WHEN 'DOW_CERT'.
 
@@ -5515,7 +5506,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
             l_node->set_data_row( wa_row ).
 
           ELSE.
-            IF lcl_utils=>cmp_version_string( i_string1 = mt_installed_modules[ tla = 'sts' ]-avers
+            IF lcl_sdk_utils=>cmp_version_string( i_string1 = mt_installed_modules[ tla = 'sts' ]-avers
                                                           i_string2 = mt_installed_modules[ tla = 'sts' ]-cvers ) = 1.
               wa_row-op_text = 'Module will be updated.' ##NO_TEXT.
               wa_row-op_icon = '@09@'.
@@ -5561,13 +5552,13 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
             l_node->set_data_row( wa_row ).
 
           ELSE.
-            IF lcl_utils=>cmp_version_string( i_string1 = mt_installed_modules[ tla = l_tla ]-avers
+            IF lcl_sdk_utils=>cmp_version_string( i_string1 = mt_installed_modules[ tla = l_tla ]-avers
                                                           i_string2 = mt_installed_modules[ tla = l_tla ]-cvers ) = 1.
               wa_row-op_text = 'Module will be updated.' ##NO_TEXT.
               wa_row-op_icon = '@09@' ##NO_TEXT.
               wa_row-op_code = lif_ui_constants=>c_operation_update.
               l_node->set_data_row( wa_row ).
-            ELSEIF lcl_utils=>cmp_version_string( i_string1 = mt_installed_modules[ tla = l_tla ]-avers
+            ELSEIF lcl_sdk_utils=>cmp_version_string( i_string1 = mt_installed_modules[ tla = l_tla ]-avers
                                                           i_string2 = mt_installed_modules[ tla = l_tla ]-cvers ) = 0.
               wa_row-op_text = 'Module up to date, no operation planned.' ##NO_TEXT.
               wa_row-op_icon = '@08@' ##NO_TEXT.
@@ -5623,7 +5614,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
       CALL FUNCTION 'TMS_UI_SHOW_TRANSPORT_LOGS'
         EXPORTING
           iv_request                 = CONV tmsbuffer-trkorr( wa_row-ctransport )
-          iv_system                  = CONV tmscsys-sysnam( lcl_utils=>get_system_name( ) )
+          iv_system                  = CONV tmscsys-sysnam( lcl_sdk_utils=>get_system_name( ) )
           iv_verbose                 = abap_true
         EXCEPTIONS
           show_transport_logs_failed = 1
@@ -5642,7 +5633,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
       CALL FUNCTION 'TMS_UI_SHOW_TRANSPORT_REQUEST'
         EXPORTING
           iv_request                    = CONV tmsbuffer-trkorr( wa_row-ctransport )
-          iv_target_system              = CONV tmscsys-sysnam( lcl_utils=>get_system_name( ) )
+          iv_target_system              = CONV tmscsys-sysnam( lcl_sdk_utils=>get_system_name( ) )
           iv_verbose                    = abap_true
         EXCEPTIONS
           show_transport_request_failed = 1
