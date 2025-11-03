@@ -2928,6 +2928,7 @@ CLASS lcl_ui_utils DEFINITION FINAL.
     CLASS-METHODS:
       get_running_jobs_message IMPORTING i_job_manager    TYPE REF TO lif_sdk_job_manager
                                RETURNING VALUE(r_message) TYPE string,
+      confirm_install_all RETURNING VALUE(r_result) TYPE abap_bool RAISING lcx_error,
       display_job_details_statusbar IMPORTING i_job_manager    TYPE REF TO lif_sdk_job_manager,
       is_fullscreen IMPORTING i_container     TYPE REF TO cl_gui_container
                     RETURNING VALUE(r_result) TYPE abap_bool,
@@ -2950,6 +2951,44 @@ CLASS lcl_ui_utils IMPLEMENTATION.
     DATA l_job_message TYPE string.
     CONCATENATE `Import background job currently running with number` wa_job-jobcount INTO r_message SEPARATED BY ' ' ##NO_TEXT.
 
+  ENDMETHOD.
+
+  METHOD confirm_install_all.
+    DATA(lv_text) = |Installing all modules is discouraged and should only be done in demo systems. |
+             && |Continue? | ##NO_TEXT.
+
+    DATA: lv_answer TYPE string.
+
+    CALL FUNCTION 'POPUP_TO_CONFIRM'
+      EXPORTING
+        titlebar              = ' '
+        diagnose_object       = ' '
+        text_question         = lv_text
+        text_button_1         = |Do it anyway|
+        icon_button_1         = ' '
+        text_button_2         = |Go back|
+        icon_button_2         = ' '
+        default_button        = '2'
+        display_cancel_button = ' '
+        userdefined_f1_help   = ' '
+        start_column          = 25
+        start_row             = 6
+        iv_quickinfo_button_1 = ' '
+        iv_quickinfo_button_2 = ' '
+      IMPORTING
+        answer                = lv_answer
+      EXCEPTIONS
+        text_not_found        = 1
+        OTHERS                = 2 ##NO_TEXT.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
+    ENDIF.
+
+    IF lv_answer = 1.
+      r_result = abap_true.
+    ELSE.
+      r_result = abap_false.
+    ENDIF.
   ENDMETHOD.
 
 
@@ -3487,7 +3526,6 @@ CLASS lcl_ui_command_ref_ctl DEFINITION INHERITING FROM lcl_ui_command_base FINA
       lif_ui_command~can_execute REDEFINITION.
 ENDCLASS.
 
-
 CLASS lcl_ui_command_ref_ctl IMPLEMENTATION.
   METHOD lif_ui_command~execute.
     tree_controller->refresh( ).
@@ -3506,7 +3544,6 @@ CLASS lcl_ui_command_btc_dtl DEFINITION INHERITING FROM lcl_ui_command_base FINA
       lif_ui_command~can_execute REDEFINITION.
 ENDCLASS.
 
-
 CLASS lcl_ui_command_btc_dtl IMPLEMENTATION.
   METHOD lif_ui_command~execute.
     MESSAGE lcl_ui_utils=>get_running_jobs_message( i_job_manager = i_tree_controller->mr_sdk_package_manager->job_manager ) TYPE 'I'.
@@ -3518,6 +3555,102 @@ CLASS lcl_ui_command_btc_dtl IMPLEMENTATION.
     ELSE.
       MESSAGE 'No background job currently running.' TYPE 'I' ##NO_TEXT.
     ENDIF.
+  ENDMETHOD.
+ENDCLASS.
+
+
+CLASS lcl_ui_command_upd_ins DEFINITION INHERITING FROM lcl_ui_command_base FINAL.
+  PUBLIC SECTION.
+    METHODS:
+      lif_ui_command~execute REDEFINITION,
+      lif_ui_command~can_execute REDEFINITION.
+ENDCLASS.
+
+CLASS lcl_ui_command_upd_ins IMPLEMENTATION.
+  METHOD lif_ui_command~execute.
+    i_tree_controller->toggle_inst_modules( i_checked = abap_true ).
+  ENDMETHOD.
+
+  METHOD lif_ui_command~can_execute.
+    r_result = super->lif_ui_command~can_execute( i_tree_controller = i_tree_controller ).
+  ENDMETHOD.
+ENDCLASS.
+
+
+CLASS lcl_ui_command_des_ins DEFINITION INHERITING FROM lcl_ui_command_base FINAL.
+  PUBLIC SECTION.
+    METHODS:
+      lif_ui_command~execute REDEFINITION,
+      lif_ui_command~can_execute REDEFINITION.
+ENDCLASS.
+
+CLASS lcl_ui_command_des_ins IMPLEMENTATION.
+  METHOD lif_ui_command~execute.
+    i_tree_controller->toggle_inst_modules( i_checked = abap_false ).
+  ENDMETHOD.
+
+  METHOD lif_ui_command~can_execute.
+    r_result = super->lif_ui_command~can_execute( i_tree_controller = i_tree_controller ).
+  ENDMETHOD.
+ENDCLASS.
+
+
+CLASS lcl_ui_command_ins_all DEFINITION INHERITING FROM lcl_ui_command_base FINAL.
+  PUBLIC SECTION.
+    METHODS:
+      lif_ui_command~execute REDEFINITION,
+      lif_ui_command~can_execute REDEFINITION.
+ENDCLASS.
+
+CLASS lcl_ui_command_ins_all IMPLEMENTATION.
+  METHOD lif_ui_command~execute.
+    DATA: l_job_message TYPE string.
+    DATA: l_jobnumber TYPE btcjobcnt.
+    l_jobnumber = i_tree_controller->mr_sdk_package_manager->install_all_modules( it_modules_to_be_installed = i_tree_controller->mt_modules_to_be_installed
+                                                                                  it_modules_to_be_deleted   = i_tree_controller->mt_modules_to_be_deleted ).
+    CONCATENATE `Submitted job with number ` l_jobnumber INTO l_job_message ##NO_TEXT.
+    MESSAGE i000(0k) WITH l_job_message.
+    i_tree_controller->refresh( ).
+  ENDMETHOD.
+
+  METHOD lif_ui_command~can_execute.
+    r_result = lcl_ui_utils=>confirm_install_all( ).
+  ENDMETHOD.
+ENDCLASS.
+
+
+CLASS lcl_ui_command_dow_crt DEFINITION INHERITING FROM lcl_ui_command_base FINAL.
+  PUBLIC SECTION.
+    METHODS:
+      lif_ui_command~execute REDEFINITION,
+      lif_ui_command~can_execute REDEFINITION.
+ENDCLASS.
+
+CLASS lcl_ui_command_dow_crt IMPLEMENTATION.
+  METHOD lif_ui_command~execute.
+    i_tree_controller->mr_sdk_package_manager->certificate_manager->install_amazon_root_certs( ).
+  ENDMETHOD.
+
+  METHOD lif_ui_command~can_execute.
+    r_result = i_tree_controller->mr_sdk_package_manager->internet_manager->has_internet_access( ).
+  ENDMETHOD.
+ENDCLASS.
+
+
+CLASS lcl_ui_command_dow_trk DEFINITION INHERITING FROM lcl_ui_command_base FINAL.
+  PUBLIC SECTION.
+    METHODS:
+      lif_ui_command~execute REDEFINITION,
+      lif_ui_command~can_execute REDEFINITION.
+ENDCLASS.
+
+CLASS lcl_ui_command_dow_trk IMPLEMENTATION.
+  METHOD lif_ui_command~execute.
+    i_tree_controller->mr_sdk_package_manager->sdk_zipfiles->download_zipfile_pair( i_version = 'LATEST' ).
+  ENDMETHOD.
+
+  METHOD lif_ui_command~can_execute.
+    r_result = i_tree_controller->mr_sdk_package_manager->internet_manager->has_internet_access( ).
   ENDMETHOD.
 ENDCLASS.
 
@@ -3556,10 +3689,10 @@ CLASS lcl_ui_command_factory IMPLEMENTATION.
 
 
       WHEN 'UPD_INST'.
-
+        r_command = NEW lcl_ui_command_upd_ins( i_tree_controller = i_tree_controller ).
 
       WHEN 'DES_INST'.
-
+        r_command = NEW lcl_ui_command_des_ins( i_tree_controller = i_tree_controller ).
 
       WHEN 'REF_TREE'.
         r_command = NEW lcl_ui_command_ref_ctl( i_tree_controller = i_tree_controller ).
@@ -3568,13 +3701,13 @@ CLASS lcl_ui_command_factory IMPLEMENTATION.
         r_command = NEW lcl_ui_command_btc_dtl( i_tree_controller = i_tree_controller ).
 
       WHEN 'DOW_CERT'.
-
+        r_command = NEW lcl_ui_command_dow_crt( i_tree_controller = i_tree_controller ).
 
       WHEN 'DOW_TRAK'.
-
+        r_command = NEW lcl_ui_command_dow_trk( i_tree_controller = i_tree_controller ).
 
       WHEN 'INS_ALL'.
-
+        r_command = NEW lcl_ui_command_ins_all( i_tree_controller =  i_tree_controller ).
 
       WHEN OTHERS.
 
@@ -5386,34 +5519,46 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
           WHEN 'UPD_INST'.
 
-            toggle_inst_modules( i_checked = abap_true ).
+            DATA(select_inst_modules_command) = lcl_ui_command_factory=>create_command( i_function_code   = e_salv_function
+                                                                                        i_tree_controller = me ).
+
+            IF select_inst_modules_command->can_execute( i_tree_controller = me ).
+              select_inst_modules_command->execute( i_tree_controller = me ).
+            ENDIF.
 
           WHEN 'DES_INST'.
 
-            toggle_inst_modules( i_checked = abap_false ).
+            DATA(select_uninst_modules_command) = lcl_ui_command_factory=>create_command( i_function_code   = e_salv_function
+                                                                                          i_tree_controller = me ).
+
+            IF select_uninst_modules_command->can_execute( i_tree_controller = me ).
+              select_uninst_modules_command->execute( i_tree_controller = me ).
+            ENDIF.
 
           WHEN 'REF_TREE'.
 
             DATA(refresh_command) = lcl_ui_command_factory=>create_command( i_function_code   = e_salv_function
                                                                             i_tree_controller = me ).
-
             IF refresh_command->can_execute( i_tree_controller = me ).
               refresh_command->execute( i_tree_controller = me ).
             ENDIF.
-
 
           WHEN 'BTC_DTLS'.
 
             DATA(batch_detail_command) = lcl_ui_command_factory=>create_command( i_function_code   = e_salv_function
                                                                                  i_tree_controller = me ).
-
             IF batch_detail_command->can_execute( i_tree_controller = me ).
               batch_detail_command->execute( i_tree_controller = me ).
             ENDIF.
 
           WHEN 'DOW_CERT'.
 
-            mr_sdk_package_manager->certificate_manager->install_amazon_root_certs( ).
+            DATA(download_certicates_command) = lcl_ui_command_factory=>create_command( i_function_code   = e_salv_function
+                                                                                        i_tree_controller = me ).
+
+            IF download_certicates_command->can_execute( i_tree_controller = me ).
+              download_certicates_command->execute( i_tree_controller = me ).
+            ENDIF.
 
           WHEN 'DOW_TRAK'.
 
@@ -5421,51 +5566,11 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
           WHEN 'INS_ALL'.
 
-            DATA(lv_text) = |Installing all modules is discouraged and should only be done in demo systems. |
-                   && |Continue? | ##NO_TEXT.
-
-            DATA: lv_answer TYPE string.
-
-            CALL FUNCTION 'POPUP_TO_CONFIRM'
-              EXPORTING
-                titlebar              = ' '
-                diagnose_object       = ' '
-                text_question         = lv_text
-                text_button_1         = |Do it anyway|
-                icon_button_1         = ' '
-                text_button_2         = |Go back|
-                icon_button_2         = ' '
-                default_button        = '2'
-                display_cancel_button = ' '
-                userdefined_f1_help   = ' '
-                start_column          = 25
-                start_row             = 6
-                iv_quickinfo_button_1 = ' '
-                iv_quickinfo_button_2 = ' '
-              IMPORTING
-                answer                = lv_answer
-              EXCEPTIONS
-                text_not_found        = 1
-                OTHERS                = 2 ##NO_TEXT.
-            IF sy-subrc <> 0.
-              RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
+            DATA(install_all_command) = lcl_ui_command_factory=>create_command( i_function_code   = e_salv_function
+                                                                                i_tree_controller = me ).
+            IF install_all_command->can_execute( i_tree_controller = me ).
+              install_all_command->execute( i_tree_controller = me ).
             ENDIF.
-
-            IF lv_answer = 1.
-
-              l_jobnumber = mr_sdk_package_manager->install_all_modules( it_modules_to_be_installed = mt_modules_to_be_installed
-                                                                         it_modules_to_be_deleted   = mt_modules_to_be_deleted ).
-
-              CONCATENATE `Submitted job with number ` l_jobnumber INTO l_job_message ##NO_TEXT.
-              MESSAGE i000(0k) WITH l_job_message.
-
-              refresh( ).
-
-            ELSE.
-              RETURN.
-            ENDIF.
-
-
 
           WHEN OTHERS.
 
