@@ -56,10 +56,10 @@ CLASS lcl_ui_command_base DEFINITION DEFERRED.
 "CLASS lcl_ui_command_ins_dia DEFINITION DEFERRED.
 "CLASS lcl_ui_command_ins_btc DEFINITION DEFERRED.
 "CLASS lcl_ui_command_del_dia DEFINITION DEFERRED.
-"CLASS lcl_ui_command_del_btc DEFINITION DEFERRED.
-"CLASS lcl_ui_command_ins_all DEFINITION DEFERRED.
-"class lcl_ui_command_dow_crt DEFINITION DEFERRED.
-"class lcl_ui_command_dow_zip DEFINITION DEFERRED.
+CLASS lcl_ui_command_del_btc DEFINITION DEFERRED.
+CLASS lcl_ui_command_ins_all DEFINITION DEFERRED.
+CLASS lcl_ui_command_dow_crt DEFINITION DEFERRED.
+CLASS lcl_ui_command_dow_trk DEFINITION DEFERRED.
 CLASS lcl_ui_command_ref_ctl DEFINITION DEFERRED.
 CLASS lcl_ui_command_btc_dtl DEFINITION DEFERRED.
 CLASS lcl_ui_utils DEFINITION DEFERRED.
@@ -2046,6 +2046,7 @@ CLASS lcl_sdk_package_manager DEFINITION FINAL.
 
     DATA:
       sdk_zipfiles                TYPE REF TO lcl_sdk_zipfile_collection READ-ONLY,
+      mt_installed_modules        TYPE tt_sdk_module,
       mt_available_modules_inst   TYPE tt_sdk_module,   " available modules for installation  (i.e. install transports)
       mt_available_modules_uninst TYPE tt_sdk_module.   " available modules for uninstallation (i.e. uninstall transports)
 
@@ -2071,6 +2072,9 @@ CLASS lcl_sdk_package_manager DEFINITION FINAL.
                           RAISING   lcx_error,
       is_deprecated IMPORTING i_tla           TYPE lcl_sdk_module=>t_tla
                     RETURNING VALUE(r_result) TYPE abap_bool,
+      is_core_installed RETURNING VALUE(r_result) TYPE abap_bool,
+      is_version_latest IMPORTING i_version       TYPE string
+                        RETURNING VALUE(r_result) TYPE abap_bool,
       get_sdk_installed_modules RETURNING VALUE(r_installed_modules) TYPE tt_sdk_module
                                 RAISING   lcx_error,
       get_sdk_deprecated_mod_inst RETURNING VALUE(r_deprecated_modules) TYPE tt_sdk_module,
@@ -2154,6 +2158,8 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
       CATCH lcx_error INTO DATA(r_error).
         MESSAGE |This report requires HTTP(S) Internet access, please enable before usage.| TYPE 'A' ##NO_TEXT.
     ENDTRY.
+
+    mt_installed_modules = get_sdk_installed_modules( ).
 
     mt_available_modules_inst = get_sdk_avail_modules_json( i_operation = 'install'
                                                             i_source    = 'web'
@@ -2598,6 +2604,40 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
 
   ENDMETHOD.
 
+  METHOD is_core_installed.
+
+    DATA: lv_result TYPE abap_bool VALUE abap_false.
+
+    DATA(lt_installed_modules) = mt_installed_modules.
+
+    IF line_exists( lt_installed_modules[ tla = 'sts' ] )
+      AND line_exists( lt_installed_modules[ tla = 's3' ] )
+      AND line_exists( lt_installed_modules[ tla = 'smr' ] )
+      AND line_exists( lt_installed_modules[ tla = 'rla' ] ).
+      lv_result = abap_true.
+    ENDIF.
+
+    r_result = lv_result.
+
+  ENDMETHOD.
+
+  METHOD is_version_latest.
+
+    TRY.
+        DATA(lt_latest_inst_modules) = get_sdk_avail_modules_json( i_operation = 'install'
+                                                                   i_source    = 'web'
+                                                                   i_version   = 'LATEST' ).
+      CATCH lcx_error.
+    ENDTRY.
+
+    IF i_version = lt_latest_inst_modules[ tla = 'core' ]-avers.
+      r_result = abap_true.
+    ELSE.
+      r_result = abap_false.
+    ENDIF.
+
+  ENDMETHOD.
+
 
   METHOD run_foreground.
 
@@ -2921,146 +2961,6 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
 
 ENDCLASS.
 
-
-
-CLASS lcl_ui_utils DEFINITION FINAL.
-  PUBLIC SECTION.
-    CLASS-METHODS:
-      get_running_jobs_message IMPORTING i_job_manager    TYPE REF TO lif_sdk_job_manager
-                               RETURNING VALUE(r_message) TYPE string,
-      confirm_install_all RETURNING VALUE(r_result) TYPE abap_bool RAISING lcx_error,
-      display_job_details_statusbar IMPORTING i_job_manager    TYPE REF TO lif_sdk_job_manager,
-      is_fullscreen IMPORTING i_container     TYPE REF TO cl_gui_container
-                    RETURNING VALUE(r_result) TYPE abap_bool,
-      is_sapgui_html RETURNING VALUE(r_result) TYPE abap_bool,
-      is_sapgui_timeout_sufficient RETURNING VALUE(r_result) TYPE abap_bool
-                                   RAISING   lcx_error.
-ENDCLASS.
-
-CLASS lcl_ui_utils IMPLEMENTATION.
-
-  METHOD get_running_jobs_message.
-
-    DATA: lt_joblist TYPE tbtcjob_tt.
-    lt_joblist = i_job_manager->get_running_jobs( i_jobname = sy-repid ).
-    DATA wa_job TYPE tbtcjob.
-    READ TABLE lt_joblist INTO wa_job INDEX 1.
-    IF sy-subrc <> 0.
-      MESSAGE |Expected to find exactly one job matching { sy-repid } but found { lines( lt_joblist ) }| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-    ENDIF.
-    DATA l_job_message TYPE string.
-    CONCATENATE `Import background job currently running with number` wa_job-jobcount INTO r_message SEPARATED BY ' ' ##NO_TEXT.
-
-  ENDMETHOD.
-
-  METHOD confirm_install_all.
-    DATA(lv_text) = |Installing all modules is discouraged and should only be done in demo systems. |
-             && |Continue? | ##NO_TEXT.
-
-    DATA: lv_answer TYPE string.
-
-    CALL FUNCTION 'POPUP_TO_CONFIRM'
-      EXPORTING
-        titlebar              = ' '
-        diagnose_object       = ' '
-        text_question         = lv_text
-        text_button_1         = |Do it anyway|
-        icon_button_1         = ' '
-        text_button_2         = |Go back|
-        icon_button_2         = ' '
-        default_button        = '2'
-        display_cancel_button = ' '
-        userdefined_f1_help   = ' '
-        start_column          = 25
-        start_row             = 6
-        iv_quickinfo_button_1 = ' '
-        iv_quickinfo_button_2 = ' '
-      IMPORTING
-        answer                = lv_answer
-      EXCEPTIONS
-        text_not_found        = 1
-        OTHERS                = 2 ##NO_TEXT.
-    IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
-    ENDIF.
-
-    IF lv_answer = 1.
-      r_result = abap_true.
-    ELSE.
-      r_result = abap_false.
-    ENDIF.
-  ENDMETHOD.
-
-
-  METHOD display_job_details_statusbar.
-
-    " Job already running?
-    IF i_job_manager->is_job_running( ).
-
-      MESSAGE get_running_jobs_message( i_job_manager = i_job_manager ) TYPE 'S' DISPLAY LIKE 'W'.
-
-    ENDIF.
-
-  ENDMETHOD.
-
-  METHOD is_fullscreen.
-
-    DATA lr_gui_container TYPE REF TO cl_gui_container.
-
-    IF i_container IS NOT INITIAL.
-      lr_gui_container = i_container.
-    ELSE.
-      lr_gui_container = CAST #( cl_gui_container=>screen0->children[ 1 ] ).
-    ENDIF.
-
-    IF lr_gui_container->get_name( ) = 'TREE_CONTAINER'.
-      r_result = abap_true.
-    ELSE.
-      r_result = abap_false.
-    ENDIF.
-
-  ENDMETHOD.
-
-  METHOD is_sapgui_html.
-
-    DATA: lv_result TYPE abap_bool VALUE abap_false.
-
-    CALL FUNCTION 'GUI_IS_ITS'
-      IMPORTING
-        return = lv_result.
-
-    r_result = lv_result.
-
-  ENDMETHOD.
-
-  METHOD is_sapgui_timeout_sufficient.
-
-    DATA: lv_gui_auto_timeout TYPE spfpflpar-pvalue VALUE '0'.
-    DATA: lv_result TYPE abap_bool VALUE abap_false.
-
-    CALL FUNCTION 'RSAN_SYSTEM_PARAMETER_READ'
-      EXPORTING
-        i_name     = 'rdisp/gui_auto_logout'
-      IMPORTING
-        e_value    = lv_gui_auto_timeout
-      EXCEPTIONS
-        read_error = 1
-        OTHERS     = 2.
-    IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
-    ENDIF.
-
-    IF lv_gui_auto_timeout > lif_ui_constants=>c_sapgui_autologout_threshold.
-      lv_result = abap_true.
-    ENDIF.
-
-    r_result = lv_result.
-
-  ENDMETHOD.
-ENDCLASS.
-
-
-
 CLASS lcl_ui_tree_controller DEFINITION FINAL.
   PUBLIC SECTION.
 
@@ -3076,13 +2976,13 @@ CLASS lcl_ui_tree_controller DEFINITION FINAL.
 
 
     DATA:
-      mr_sdk_package_manager       TYPE REF TO lcl_sdk_package_manager,
+      sdk_package_manager          TYPE REF TO lcl_sdk_package_manager,
       mr_container                 TYPE REF TO cl_gui_container,
       mr_tree                      TYPE REF TO cl_salv_tree,
       mt_treetab                   TYPE tt_sdk_module,
-      mt_installed_modules         TYPE tt_sdk_module,
-      mt_available_modules_inst    TYPE tt_sdk_module,
-      mt_available_modules_uninst  TYPE tt_sdk_module,
+      "      mt_installed_modules         TYPE tt_sdk_module,
+      "      mt_available_modules_inst    TYPE tt_sdk_module,
+      "      mt_available_modules_uninst  TYPE tt_sdk_module,
       mt_popular_modules           TYPE tt_sdk_tla,
       mt_modules_to_be_installed   TYPE tt_sdk_tla,
       mt_modules_to_be_deleted     TYPE tt_sdk_tla,
@@ -3108,9 +3008,6 @@ CLASS lcl_ui_tree_controller DEFINITION FINAL.
                                 RETURNING VALUE(rt_modules_to_be_updated) TYPE tt_sdk_tla,
       save_node_key IMPORTING ir_node_name TYPE string
                               ir_node_key  TYPE salv_de_node_key,
-      is_core_installed RETURNING VALUE(r_result) TYPE abap_bool,
-      is_version_latest IMPORTING i_version       TYPE string
-                        RETURNING VALUE(r_result) TYPE abap_bool,
       toggle_inst_modules IMPORTING i_checked TYPE abap_bool,
       fill_fullscreen_content,
       create_container,
@@ -3130,29 +3027,6 @@ CLASS lcl_ui_tree_controller DEFINITION FINAL.
       set_handlers,
       set_settings,
       set_functions,
-      check_selection_sanity
-        IMPORTING it_modules_tbi  TYPE tt_sdk_tla
-                  it_modules_tbd  TYPE tt_sdk_tla
-                  i_op            TYPE string
-                  i_salv_function TYPE syst_ucomm
-        RETURNING VALUE(r_result) TYPE abap_bool
-        RAISING   lcx_error,
-      check_selection_mod_thresholds IMPORTING it_modules_tbi  TYPE tt_sdk_tla
-                                               it_modules_tbd  TYPE tt_sdk_tla
-                                               i_op            TYPE string
-                                               i_salv_function TYPE syst_ucomm
-                                     RETURNING VALUE(r_result) TYPE abap_bool
-                                     RAISING   lcx_error,
-      check_selection_core_validity IMPORTING it_modules_tbi  TYPE tt_sdk_tla
-                                              it_modules_tbd  TYPE tt_sdk_tla
-                                              i_op            TYPE string
-                                              i_salv_function TYPE syst_ucomm
-                                    RETURNING VALUE(r_result) TYPE abap_bool,
-      check_selection_populated IMPORTING it_modules_tbi  TYPE tt_sdk_tla
-                                          it_modules_tbd  TYPE tt_sdk_tla
-                                          i_op            TYPE string
-                                          i_salv_function TYPE syst_ucomm
-                                RETURNING VALUE(r_result) TYPE abap_bool,
       handle_user_command FOR EVENT added_function OF cl_salv_events_tree IMPORTING e_salv_function ,
       handle_checkbox_changed  FOR EVENT checkbox_change OF cl_salv_events_tree IMPORTING node_key columnname checked,
       handle_double_click FOR EVENT double_click OF cl_salv_events_tree IMPORTING node_key columnname,
@@ -3165,80 +3039,70 @@ CLASS lcl_ui_tree_controller DEFINITION FINAL.
 ENDCLASS.
 
 
-INTERFACE lif_ui_command.
-  METHODS:
-    execute IMPORTING i_tree_controller TYPE REF TO lcl_ui_tree_controller
-            RAISING   lcx_error,
-    can_execute IMPORTING i_tree_controller TYPE REF TO lcl_ui_tree_controller
-                RETURNING VALUE(r_result)   TYPE abap_bool
-                RAISING   lcx_error.
-ENDINTERFACE.
-
-
-CLASS lcl_ui_command_base DEFINITION ABSTRACT.
+CLASS lcl_ui_selection_validator DEFINITION FINAL.
   PUBLIC SECTION.
-    INTERFACES:
-      lif_ui_command.
-
-    DATA:
-      tree_controller TYPE REF TO lcl_ui_tree_controller.
-
-    METHODS:
-      constructor IMPORTING i_tree_controller TYPE REF TO lcl_ui_tree_controller.
-
-  PROTECTED SECTION.
-    METHODS:
-      get_target_version RETURNING VALUE(r_version)  TYPE string ,
-      validation_selection RETURNING VALUE(r_result) TYPE abap_bool
+    CLASS-METHODS:
+      validate_selection IMPORTING it_modules_tbi    TYPE tt_sdk_tla
+                                   it_modules_tbd    TYPE tt_sdk_tla
+                                   i_op              TYPE string
+                                   i_salv_function   TYPE syst_ucomm
+                                   i_tree_controller TYPE REF TO lcl_ui_tree_controller
+                         RETURNING VALUE(r_result)   TYPE abap_bool
+                         RAISING   lcx_error,
+      check_mod_thresholds IMPORTING it_modules_tbi    TYPE tt_sdk_tla
+                                     it_modules_tbd    TYPE tt_sdk_tla
+                                     i_op              TYPE string
+                                     i_salv_function   TYPE syst_ucomm
+                                     i_tree_controller TYPE REF TO lcl_ui_tree_controller
+                           RETURNING VALUE(r_result)   TYPE abap_bool
                            RAISING   lcx_error,
-      check_selection_sanity IMPORTING it_modules_tbi  TYPE tt_sdk_tla
-                                       it_modules_tbd  TYPE tt_sdk_tla
-                                       i_op            TYPE string
-                                       i_salv_function TYPE syst_ucomm
-                             RETURNING VALUE(r_result) TYPE abap_bool
-                             RAISING   lcx_error,
-      check_selection_mod_thresholds IMPORTING it_modules_tbi  TYPE tt_sdk_tla
-                                               it_modules_tbd  TYPE tt_sdk_tla
-                                               i_op            TYPE string
-                                               i_salv_function TYPE syst_ucomm
-                                     RETURNING VALUE(r_result) TYPE abap_bool
-                                     RAISING   lcx_error,
-      check_selection_core_validity IMPORTING it_modules_tbi  TYPE tt_sdk_tla
-                                              it_modules_tbd  TYPE tt_sdk_tla
-                                              i_op            TYPE string
-                                              i_salv_function TYPE syst_ucomm
-                                    RETURNING VALUE(r_result) TYPE abap_bool,
-      check_selection_populated IMPORTING it_modules_tbi  TYPE tt_sdk_tla
-                                          it_modules_tbd  TYPE tt_sdk_tla
-                                          i_op            TYPE string
-                                          i_salv_function TYPE syst_ucomm
-                                RETURNING VALUE(r_result) TYPE abap_bool.
-
+      check_core_validity IMPORTING it_modules_tbi    TYPE tt_sdk_tla
+                                    it_modules_tbd    TYPE tt_sdk_tla
+                                    i_op              TYPE string
+                                    i_salv_function   TYPE syst_ucomm
+                                    i_tree_controller TYPE REF TO lcl_ui_tree_controller
+                          RETURNING VALUE(r_result)   TYPE abap_bool
+                          RAISING   lcx_error,
+      check_populated IMPORTING it_modules_tbi    TYPE tt_sdk_tla
+                                it_modules_tbd    TYPE tt_sdk_tla
+                                i_op              TYPE string
+                                i_salv_function   TYPE syst_ucomm
+                                i_tree_controller TYPE REF TO lcl_ui_tree_controller
+                      RETURNING VALUE(r_result)   TYPE abap_bool
+                      RAISING   lcx_error.
 ENDCLASS.
 
-CLASS lcl_ui_command_base IMPLEMENTATION.
+CLASS lcl_ui_selection_validator IMPLEMENTATION.
 
-  METHOD constructor.
-    tree_controller = i_tree_controller.
-  ENDMETHOD.
 
-  METHOD lif_ui_command~execute.
-    " Do nothing in base case.
-  ENDMETHOD.
+  METHOD validate_selection.
 
-  METHOD lif_ui_command~can_execute.
+
+    CHECK check_populated( it_modules_tbi  = it_modules_tbi
+                                                     it_modules_tbd  = it_modules_tbd
+                                                     i_op            = i_op
+                                                     i_salv_function = i_salv_function
+                                                     i_tree_controller = i_tree_controller ).
+
+    CHECK check_core_validity( it_modules_tbi  = it_modules_tbi
+                                                             it_modules_tbd  = it_modules_tbd
+                                                             i_op            = i_op
+                                                             i_salv_function = i_salv_function
+                                                             i_tree_controller = i_tree_controller ).
+
+    CHECK check_mod_thresholds( it_modules_tbi = it_modules_tbi
+                                it_modules_tbd = it_modules_tbd
+                                i_op = i_op
+                                i_salv_function = i_salv_function
+                                i_tree_controller = i_tree_controller ).
+
     r_result = abap_true.
-  ENDMETHOD.
 
-  METHOD get_target_version.
-    r_version = 'LATEST'.
-  ENDMETHOD.
-
-  METHOD validation_selection.
 
   ENDMETHOD.
 
-  METHOD check_selection_mod_thresholds.
+
+  METHOD check_mod_thresholds.
 
     DATA lv_text TYPE string.
     DATA lv_answer TYPE c.
@@ -3248,16 +3112,16 @@ CLASS lcl_ui_command_base IMPLEMENTATION.
       WHEN 'install'.
         DATA(lv_number_modules_inst) = lines( it_modules_tbi ).
         DATA(lv_number_new_modules) = 0.
-        DATA(lv_number_modules_avail_inst) = lines( tree_controller->mt_available_modules_inst ).
+        DATA(lv_number_modules_avail_inst) = lines( i_tree_controller->sdk_package_manager->mt_available_modules_inst ).
 
         " determine modules to be net newly installed
         LOOP AT it_modules_tbi INTO DATA(wa_module_tbi).
-          IF ( wa_module_tbi-tla <> 'core' ) AND NOT line_exists( tree_controller->mt_installed_modules[ tla = wa_module_tbi-tla ] ).
+          IF ( wa_module_tbi-tla <> 'core' ) AND NOT line_exists( i_tree_controller->sdk_package_manager->mt_installed_modules[ tla = wa_module_tbi-tla ] ).
             lv_number_new_modules = lv_number_new_modules + 1.
             lv_number_modules_inst = lv_number_modules_inst - 1.
           ENDIF.
 
-          IF ( wa_module_tbi-tla = 'core' ) AND ( NOT tree_controller->is_core_installed( ) ).
+          IF ( wa_module_tbi-tla = 'core' ) AND ( NOT i_tree_controller->sdk_package_manager->is_core_installed( ) ).
             lv_number_new_modules = lv_number_new_modules + 1.
             lv_number_modules_inst = lv_number_modules_inst - 1.
           ENDIF.
@@ -3399,7 +3263,7 @@ CLASS lcl_ui_command_base IMPLEMENTATION.
 
   ENDMETHOD.
 
-  METHOD check_selection_core_validity.
+  METHOD check_core_validity.
 
     DATA: lv_result TYPE abap_bool VALUE abap_false.
 
@@ -3407,15 +3271,15 @@ CLASS lcl_ui_command_base IMPLEMENTATION.
 
       WHEN 'install'.
 
-        IF tree_controller->is_core_installed( ) = abap_false                            " core is NOT installed
+        IF i_tree_controller->sdk_package_manager->is_core_installed( ) = abap_false                            " core is NOT installed
           AND NOT line_exists( it_modules_tbi[ tla = 'core' ] )  " and NOT selected for installation
           AND lines( it_modules_tbi ) > 0.                              " are other modules selected for installation?
           MESSAGE |Please install core module with first deployment.| TYPE 'S' DISPLAY LIKE 'E' ##NO_TEXT.
           lv_result = abap_false.                                       " then block the request
 
-        ELSEIF tree_controller->is_core_installed( ) = abap_true                         " core is installed
+        ELSEIF i_tree_controller->sdk_package_manager->is_core_installed( ) = abap_true                         " core is installed
             AND line_exists( it_modules_tbd[ tla = 'core' ] )    " and marked for deletion
-            AND ( lines( it_modules_tbd ) < lines( tree_controller->mt_installed_modules ) - 3    " are any installed modules NOT selected for deletion?
+            AND ( lines( it_modules_tbd ) < lines( i_tree_controller->sdk_package_manager->mt_installed_modules ) - 3    " are any installed modules NOT selected for deletion?
             OR lines( it_modules_tbi ) > 0 ).                                   " or did the user select additional modules for installation?
           MESSAGE |To delete core, additionally mark all installed modules for deletion.| TYPE 'S' DISPLAY LIKE 'E' ##NO_TEXT.
           lv_result = abap_false.                                       " then block the request
@@ -3426,9 +3290,9 @@ CLASS lcl_ui_command_base IMPLEMENTATION.
 
       WHEN 'uninstall'.
 
-        IF tree_controller->is_core_installed( ) = abap_true                           " core is installed
+        IF i_tree_controller->sdk_package_manager->is_core_installed( ) = abap_true                           " core is installed
             AND line_exists( it_modules_tbd[ tla = 'core' ] )  " and marked for deletion
-            AND ( lines( it_modules_tbd ) < lines( tree_controller->mt_installed_modules ) - 3 " are any installed modules NOT selected for deletion?
+            AND ( lines( it_modules_tbd ) < lines( i_tree_controller->sdk_package_manager->mt_installed_modules ) - 3 " are any installed modules NOT selected for deletion?
             OR lines( it_modules_tbi ) > 0 ).                                " or did the user select additional modules for installation?
           MESSAGE |To delete core, additionally mark all installed modules for deletion.| TYPE 'S' DISPLAY LIKE 'E' ##NO_TEXT.
           lv_result = abap_false.                                           " then block the request
@@ -3443,7 +3307,7 @@ CLASS lcl_ui_command_base IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD check_selection_populated.
+  METHOD check_populated.
 
     DATA: lv_result TYPE abap_bool VALUE abap_false.
 
@@ -3474,48 +3338,257 @@ CLASS lcl_ui_command_base IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD check_selection_sanity.
 
-    DATA: lv_result_populated TYPE abap_bool VALUE abap_false.
-    DATA: lv_result_core_validity TYPE abap_bool VALUE abap_false.
-    DATA: lv_result_mod_thresholds TYPE abap_bool VALUE abap_false.
+ENDCLASS.
 
-    lv_result_populated = check_selection_populated( it_modules_tbi  = it_modules_tbi
-                                                     it_modules_tbd  = it_modules_tbd
-                                                     i_op            = i_op
-                                                     i_salv_function = i_salv_function ).
 
-    IF lv_result_populated = abap_false.
-      r_result = abap_false.
-      RETURN.
+
+CLASS lcl_ui_utils DEFINITION FINAL.
+  PUBLIC SECTION.
+    CLASS-METHODS:
+      get_running_jobs_message IMPORTING i_job_manager    TYPE REF TO lif_sdk_job_manager
+                               RETURNING VALUE(r_message) TYPE string,
+      confirm_install_all RETURNING VALUE(r_result) TYPE abap_bool RAISING lcx_error,
+      display_job_details_statusbar IMPORTING i_job_manager    TYPE REF TO lif_sdk_job_manager,
+      is_fullscreen IMPORTING i_container     TYPE REF TO cl_gui_container
+                    RETURNING VALUE(r_result) TYPE abap_bool,
+      is_sapgui_html RETURNING VALUE(r_result) TYPE abap_bool,
+      is_sapgui_timeout_sufficient RETURNING VALUE(r_result) TYPE abap_bool
+                                   RAISING   lcx_error.
+ENDCLASS.
+
+CLASS lcl_ui_utils IMPLEMENTATION.
+
+  METHOD get_running_jobs_message.
+
+    DATA: lt_joblist TYPE tbtcjob_tt.
+    lt_joblist = i_job_manager->get_running_jobs( i_jobname = sy-repid ).
+    DATA wa_job TYPE tbtcjob.
+    READ TABLE lt_joblist INTO wa_job INDEX 1.
+    IF sy-subrc <> 0.
+      MESSAGE |Expected to find exactly one job matching { sy-repid } but found { lines( lt_joblist ) }| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
     ENDIF.
-
-    lv_result_core_validity = check_selection_core_validity( it_modules_tbi  = it_modules_tbi
-                                                             it_modules_tbd  = it_modules_tbd
-                                                             i_op            = i_op
-                                                             i_salv_function = i_salv_function ).
-
-    IF lv_result_core_validity = abap_false.
-      r_result = abap_false.
-      RETURN.
-    ENDIF.
-
-    lv_result_mod_thresholds = check_selection_mod_thresholds( it_modules_tbi  = it_modules_tbi
-                                                               it_modules_tbd  = it_modules_tbd
-                                                               i_op            = i_op
-                                                               i_salv_function = i_salv_function ).
-
-    IF lv_result_mod_thresholds = abap_false.
-      r_result = abap_false.
-      RETURN.
-    ENDIF.
-
-
-    r_result = abap_true.
-
+    DATA l_job_message TYPE string.
+    CONCATENATE `Import background job currently running with number` wa_job-jobcount INTO r_message SEPARATED BY ' ' ##NO_TEXT.
 
   ENDMETHOD.
 
+  METHOD confirm_install_all.
+    DATA(lv_text) = |Installing all modules is discouraged and should only be done in demo systems. |
+             && |Continue? | ##NO_TEXT.
+
+    DATA: lv_answer TYPE string.
+
+    CALL FUNCTION 'POPUP_TO_CONFIRM'
+      EXPORTING
+        titlebar              = ' '
+        diagnose_object       = ' '
+        text_question         = lv_text
+        text_button_1         = |Do it anyway|
+        icon_button_1         = ' '
+        text_button_2         = |Go back|
+        icon_button_2         = ' '
+        default_button        = '2'
+        display_cancel_button = ' '
+        userdefined_f1_help   = ' '
+        start_column          = 25
+        start_row             = 6
+        iv_quickinfo_button_1 = ' '
+        iv_quickinfo_button_2 = ' '
+      IMPORTING
+        answer                = lv_answer
+      EXCEPTIONS
+        text_not_found        = 1
+        OTHERS                = 2 ##NO_TEXT.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
+    ENDIF.
+
+    IF lv_answer = 1.
+      r_result = abap_true.
+    ELSE.
+      r_result = abap_false.
+    ENDIF.
+  ENDMETHOD.
+
+
+  METHOD display_job_details_statusbar.
+
+    " Job already running?
+    IF i_job_manager->is_job_running( ).
+
+      MESSAGE get_running_jobs_message( i_job_manager = i_job_manager ) TYPE 'S' DISPLAY LIKE 'W'.
+
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD is_fullscreen.
+
+    DATA lr_gui_container TYPE REF TO cl_gui_container.
+
+    IF i_container IS NOT INITIAL.
+      lr_gui_container = i_container.
+    ELSE.
+      lr_gui_container = CAST #( cl_gui_container=>screen0->children[ 1 ] ).
+    ENDIF.
+
+    IF lr_gui_container->get_name( ) = 'TREE_CONTAINER'.
+      r_result = abap_true.
+    ELSE.
+      r_result = abap_false.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD is_sapgui_html.
+
+    DATA: lv_result TYPE abap_bool VALUE abap_false.
+
+    CALL FUNCTION 'GUI_IS_ITS'
+      IMPORTING
+        return = lv_result.
+
+    r_result = lv_result.
+
+  ENDMETHOD.
+
+  METHOD is_sapgui_timeout_sufficient.
+
+    DATA: lv_gui_auto_timeout TYPE spfpflpar-pvalue VALUE '0'.
+    DATA: lv_result TYPE abap_bool VALUE abap_false.
+
+    CALL FUNCTION 'RSAN_SYSTEM_PARAMETER_READ'
+      EXPORTING
+        i_name     = 'rdisp/gui_auto_logout'
+      IMPORTING
+        e_value    = lv_gui_auto_timeout
+      EXCEPTIONS
+        read_error = 1
+        OTHERS     = 2.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
+    ENDIF.
+
+    IF lv_gui_auto_timeout > lif_ui_constants=>c_sapgui_autologout_threshold.
+      lv_result = abap_true.
+    ENDIF.
+
+    r_result = lv_result.
+
+  ENDMETHOD.
+ENDCLASS.
+
+
+
+INTERFACE lif_ui_command.
+  METHODS:
+    execute IMPORTING i_tree_controller TYPE REF TO lcl_ui_tree_controller
+            RAISING   lcx_error,
+    can_execute IMPORTING i_tree_controller TYPE REF TO lcl_ui_tree_controller
+                RETURNING VALUE(r_result)   TYPE abap_bool
+                RAISING   lcx_error.
+ENDINTERFACE.
+
+
+CLASS lcl_ui_command_base DEFINITION ABSTRACT.
+  PUBLIC SECTION.
+    INTERFACES:
+      lif_ui_command.
+
+    METHODS:
+      constructor IMPORTING i_tree_controller TYPE REF TO lcl_ui_tree_controller.
+
+
+  PROTECTED SECTION.
+    DATA:
+    tree_controller TYPE REF TO lcl_ui_tree_controller.
+
+    METHODS:
+      get_target_version RETURNING VALUE(r_version)  TYPE string.
+
+ENDCLASS.
+
+CLASS lcl_ui_command_base IMPLEMENTATION.
+
+  METHOD constructor.
+    tree_controller = i_tree_controller.
+  ENDMETHOD.
+
+  METHOD lif_ui_command~execute.
+    " Do nothing in base case.
+  ENDMETHOD.
+
+  METHOD lif_ui_command~can_execute.
+    r_result = abap_true.
+  ENDMETHOD.
+
+  METHOD get_target_version.
+    r_version = 'LATEST'.
+  ENDMETHOD.
+
+ENDCLASS.
+
+
+CLASS lcl_ui_command_del_btc DEFINITION INHERITING FROM lcl_ui_command_base FINAL.
+  PUBLIC SECTION.
+    METHODS:
+      lif_ui_command~execute REDEFINITION,
+      lif_ui_command~can_execute REDEFINITION.
+ENDCLASS.
+
+CLASS lcl_ui_command_del_btc IMPLEMENTATION.
+  METHOD lif_ui_command~execute.
+
+    DATA:lv_target_version TYPE string.
+
+    " we only use the same version as core (given it is installed at all)
+    " if the installed version of core is  NOT the latest version
+    IF tree_controller->sdk_package_manager->is_core_installed( ) = abap_true.
+      IF NOT tree_controller->sdk_package_manager->is_version_latest( tree_controller->sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-cvers ).
+        lv_target_version = tree_controller->sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-cvers.
+      ELSE.
+        lv_target_version = 'LATEST'.
+      ENDIF.
+    ELSE.
+      lv_target_version = 'LATEST'.
+    ENDIF.
+
+
+    CLEAR: tree_controller->mt_modules_to_be_installed.
+    CLEAR: tree_controller->mt_modules_to_be_deleted.
+    tree_controller->mt_modules_to_be_deleted = tree_controller->get_modules_to_be_deleted( i_target_version = lv_target_version )..
+
+
+    IF lcl_ui_selection_validator=>validate_selection( it_modules_tbi = tree_controller->mt_modules_to_be_installed
+                                                       it_modules_tbd = tree_controller->mt_modules_to_be_deleted
+                                                       i_salv_function = 'DEL_BGND'
+                                                       i_op = 'uninstall'
+                                                       i_tree_controller = tree_controller ) = abap_false.
+      RETURN.
+    ENDIF.
+
+    IF lines( tree_controller->mt_modules_to_be_deleted ) > 0.
+
+      IF tree_controller->sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = lv_target_version ) = abap_false.
+        RETURN.
+      ENDIF.
+
+    ENDIF.
+
+    DATA(l_jobnumber) = tree_controller->sdk_package_manager->job_manager->submit_batch_job( i_modules_to_be_installed = tree_controller->mt_modules_to_be_installed " empty since modules tbi are not collected here
+                                                                                             i_modules_to_be_deleted   = tree_controller->mt_modules_to_be_deleted
+                                                                                             i_target_version          = lv_target_version ).
+
+    CONCATENATE `Submitted job with number ` l_jobnumber INTO DATA(l_job_message) ##NO_TEXT.
+    MESSAGE i000(0k) WITH l_job_message.
+    tree_controller->refresh( ).
+
+  ENDMETHOD.
+
+  METHOD lif_ui_command~can_execute.
+
+  ENDMETHOD.
 ENDCLASS.
 
 
@@ -3532,7 +3605,7 @@ CLASS lcl_ui_command_ref_ctl IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD lif_ui_command~can_execute.
-    r_result = super->lif_ui_command~can_execute( i_tree_controller = tree_controller ).
+    r_result = super->lif_ui_command~can_execute( i_tree_controller = i_tree_controller ).
   ENDMETHOD.
 ENDCLASS.
 
@@ -3546,11 +3619,11 @@ ENDCLASS.
 
 CLASS lcl_ui_command_btc_dtl IMPLEMENTATION.
   METHOD lif_ui_command~execute.
-    MESSAGE lcl_ui_utils=>get_running_jobs_message( i_job_manager = i_tree_controller->mr_sdk_package_manager->job_manager ) TYPE 'I'.
+    MESSAGE lcl_ui_utils=>get_running_jobs_message( i_job_manager = i_tree_controller->sdk_package_manager->job_manager ) TYPE 'I'.
   ENDMETHOD.
 
   METHOD lif_ui_command~can_execute.
-    IF tree_controller->mr_sdk_package_manager->job_manager->is_job_running( ).
+    IF tree_controller->sdk_package_manager->job_manager->is_job_running( ).
       r_result = abap_true.
     ELSE.
       MESSAGE 'No background job currently running.' TYPE 'I' ##NO_TEXT.
@@ -3606,8 +3679,8 @@ CLASS lcl_ui_command_ins_all IMPLEMENTATION.
   METHOD lif_ui_command~execute.
     DATA: l_job_message TYPE string.
     DATA: l_jobnumber TYPE btcjobcnt.
-    l_jobnumber = i_tree_controller->mr_sdk_package_manager->install_all_modules( it_modules_to_be_installed = i_tree_controller->mt_modules_to_be_installed
-                                                                                  it_modules_to_be_deleted   = i_tree_controller->mt_modules_to_be_deleted ).
+    l_jobnumber = i_tree_controller->sdk_package_manager->install_all_modules( it_modules_to_be_installed = i_tree_controller->mt_modules_to_be_installed
+                                                                               it_modules_to_be_deleted   = i_tree_controller->mt_modules_to_be_deleted ).
     CONCATENATE `Submitted job with number ` l_jobnumber INTO l_job_message ##NO_TEXT.
     MESSAGE i000(0k) WITH l_job_message.
     i_tree_controller->refresh( ).
@@ -3628,11 +3701,11 @@ ENDCLASS.
 
 CLASS lcl_ui_command_dow_crt IMPLEMENTATION.
   METHOD lif_ui_command~execute.
-    i_tree_controller->mr_sdk_package_manager->certificate_manager->install_amazon_root_certs( ).
+    i_tree_controller->sdk_package_manager->certificate_manager->install_amazon_root_certs( ).
   ENDMETHOD.
 
   METHOD lif_ui_command~can_execute.
-    r_result = i_tree_controller->mr_sdk_package_manager->internet_manager->has_internet_access( ).
+    r_result = i_tree_controller->sdk_package_manager->internet_manager->has_internet_access( ).
   ENDMETHOD.
 ENDCLASS.
 
@@ -3646,11 +3719,11 @@ ENDCLASS.
 
 CLASS lcl_ui_command_dow_trk IMPLEMENTATION.
   METHOD lif_ui_command~execute.
-    i_tree_controller->mr_sdk_package_manager->sdk_zipfiles->download_zipfile_pair( i_version = 'LATEST' ).
+    i_tree_controller->sdk_package_manager->sdk_zipfiles->download_zipfile_pair( i_version = 'LATEST' ).
   ENDMETHOD.
 
   METHOD lif_ui_command~can_execute.
-    r_result = i_tree_controller->mr_sdk_package_manager->internet_manager->has_internet_access( ).
+    r_result = i_tree_controller->sdk_package_manager->internet_manager->has_internet_access( ).
   ENDMETHOD.
 ENDCLASS.
 
@@ -3686,7 +3759,7 @@ CLASS lcl_ui_command_factory IMPLEMENTATION.
 
 
       WHEN 'DEL_BGND'.
-
+        r_command = NEW lcl_ui_command_del_btc( i_tree_controller = i_tree_controller ).
 
       WHEN 'UPD_INST'.
         r_command = NEW lcl_ui_command_upd_ins( i_tree_controller = i_tree_controller ).
@@ -3717,27 +3790,30 @@ CLASS lcl_ui_command_factory IMPLEMENTATION.
 ENDCLASS.
 
 
+
+
+
 CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
   METHOD constructor.
 
     IF ir_sdk_package_manager IS BOUND.
-      mr_sdk_package_manager = ir_sdk_package_manager.
+      sdk_package_manager = ir_sdk_package_manager.
     ELSE.
-      mr_sdk_package_manager = NEW lcl_sdk_package_manager( ).
+      sdk_package_manager = NEW lcl_sdk_package_manager( ).
     ENDIF.
 
 
-    mt_installed_modules = mr_sdk_package_manager->get_sdk_installed_modules( ).
+    "mt_installed_modules = sdk_package_manager->get_sdk_installed_modules( ).
+    "
+    "mt_available_modules_inst = sdk_package_manager->get_sdk_avail_modules_json( i_operation = 'install'
+    "                                                                                i_source    = 'web'
+    "                                                                               i_version   = 'LATEST' ).
+    "mt_available_modules_uninst = sdk_package_manager->get_sdk_avail_modules_json( i_operation = 'uninstall'
+    "                                                                                  i_source    = 'web'
+    "                                                                                  i_version   = 'LATEST' ).
 
-    mt_available_modules_inst = mr_sdk_package_manager->get_sdk_avail_modules_json( i_operation = 'install'
-                                                                                    i_source    = 'web'
-                                                                                    i_version   = 'LATEST' ).
-    mt_available_modules_uninst = mr_sdk_package_manager->get_sdk_avail_modules_json( i_operation = 'uninstall'
-                                                                                      i_source    = 'web'
-                                                                                      i_version   = 'LATEST' ).
-
-    SELECT tla FROM @mt_available_modules_inst AS am WHERE is_popular = 'X' INTO TABLE @mt_popular_modules .
+    SELECT tla FROM @sdk_package_manager->mt_available_modules_inst AS am WHERE is_popular = 'X' INTO TABLE @mt_popular_modules .
 
     " re-hydrate the module staging area if report is restarted
     IMPORT st_modules_to_be_installed = mt_modules_to_be_installed FROM SHARED BUFFER indx(mi) ID 'MOD_INST'.
@@ -3946,26 +4022,26 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
                    ir_node_key  = lr_key ).
 
     DATA wa_core_module TYPE ts_sdk_module.
-    READ TABLE mt_installed_modules WITH KEY tla = 'sts' INTO wa_core_module. " core module installed?
+    READ TABLE sdk_package_manager->mt_installed_modules WITH KEY tla = 'sts' INTO wa_core_module. " core module installed?
     IF sy-subrc <> 0.
 
     ENDIF.
 
     wa_core_module-tla = 'core'.
     wa_core_module-name = 'AWS SDK for SAP ABAP core [s3, smr, rla, sts]' ##NO_TEXT.
-    wa_core_module-avers = mt_available_modules_inst[ tla = 'core' ]-avers.
-    wa_core_module-atransport = mt_available_modules_inst[ tla = 'core' ]-atransport.
+    wa_core_module-avers = sdk_package_manager->mt_available_modules_inst[ tla = 'core' ]-avers.
+    wa_core_module-atransport = sdk_package_manager->mt_available_modules_inst[ tla = 'core' ]-atransport.
 
 
 
     IF wa_core_module-cvers IS NOT INITIAL.
 
-      IF lcl_sdk_utils=>cmp_version_string( i_string1 = mt_available_modules_inst[ tla = 'core' ]-avers
+      IF lcl_sdk_utils=>cmp_version_string( i_string1 = sdk_package_manager->mt_available_modules_inst[ tla = 'core' ]-avers
                                                     i_string2 = wa_core_module-cvers ) = 0.
         wa_core_module-op_icon = '@08@'.
         wa_core_module-op_text = 'Module up to date, no operation planned.' ##NO_TEXT.
         wa_core_module-op_code = lif_ui_constants=>c_operation_none.
-      ELSEIF lcl_sdk_utils=>cmp_version_string( i_string1 = mt_available_modules_inst[ tla = 'core' ]-avers
+      ELSEIF lcl_sdk_utils=>cmp_version_string( i_string1 = sdk_package_manager->mt_available_modules_inst[ tla = 'core' ]-avers
                                                         i_string2 = wa_core_module-cvers ) = 1.
         wa_core_module-op_icon = '@09@'.
         wa_core_module-op_text = 'Module will be updated.' ##NO_TEXT.
@@ -3995,11 +4071,11 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
       " is_core_installed( ) does not always work here as not all 4 core modules might
       " be fully present yet during an installation run
-      IF is_core_installed( ) = abap_false
+      IF sdk_package_manager->is_core_installed( ) = abap_false
        OR wa_core_module-cvers IS NOT INITIAL
        AND line_exists( mt_modules_to_be_installed[ tla = 'core' ] ).
         wa_core_module-op_text = 'Installation operation in progress.' ##NO_TEXT.
-      ELSEIF is_core_installed( ) = abap_true
+      ELSEIF sdk_package_manager->is_core_installed( ) = abap_true
         OR wa_core_module-cvers IS INITIAL
         AND line_exists( mt_modules_to_be_deleted[ tla = 'core' ] ).
         wa_core_module-op_text = 'Delete operation in progress.' ##NO_TEXT.
@@ -4040,16 +4116,16 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 *      lr_item->set_editable( abap_true ).
 *    ENDIF.
 
-    IF is_core_installed( ) = abap_true  " core installed and should be updated
+    IF sdk_package_manager->is_core_installed( ) = abap_true  " core installed and should be updated
      AND line_exists( mt_modules_to_be_installed[ tla = 'core' ] ).
       lr_item->set_checked( abap_true ).
-    ELSEIF is_core_installed( ) = abap_true  " core installed and should be deleted
+    ELSEIF sdk_package_manager->is_core_installed( ) = abap_true  " core installed and should be deleted
       AND line_exists( mt_modules_to_be_deleted[ tla = 'core' ] ).
       lr_item->set_checked( abap_false ).
-    ELSEIF is_core_installed( ) = abap_true   " core installed and should NOT be updated
+    ELSEIF sdk_package_manager->is_core_installed( ) = abap_true   " core installed and should NOT be updated
       AND NOT line_exists( mt_modules_to_be_installed[ tla = 'core' ] ).
       lr_item->set_checked( abap_true ).
-    ELSEIF NOT is_core_installed( ) = abap_true   " core NOT installed and should be installed
+    ELSEIF NOT sdk_package_manager->is_core_installed( ) = abap_true   " core NOT installed and should be installed
       AND line_exists( mt_modules_to_be_installed[ tla = 'core' ] ).
       lr_item->set_checked( abap_true ).
     ELSE.
@@ -4057,7 +4133,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
     ENDIF.
 
 
-    IF mr_sdk_package_manager->job_manager->is_job_running( ).
+    IF sdk_package_manager->job_manager->is_job_running( ).
       lr_item->set_editable( abap_false ).
     ENDIF.
 
@@ -4076,7 +4152,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
     lr_nodes = mr_tree->get_nodes( ).
 
     " TODO: returning the no of modules (installed, available) should go into a dedicated function.
-    DATA(l_inst_mod_no) = lines( mt_installed_modules ).
+    DATA(l_inst_mod_no) = lines( sdk_package_manager->mt_installed_modules ).
     IF l_inst_mod_no >= 4.
       l_inst_mod_no = l_inst_mod_no - 3.
     ENDIF.
@@ -4097,7 +4173,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
 
 
-    IF lines( mt_installed_modules ) > 0.
+    IF lines( sdk_package_manager->mt_installed_modules ) > 0.
       TRY.
           lr_node->expand( ).
         CATCH cx_salv_msg.
@@ -4116,11 +4192,11 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
 
 
-    SORT mt_installed_modules BY tla.
+    SORT sdk_package_manager->mt_installed_modules BY tla.
 
     DATA wa_installed_module TYPE ts_sdk_module.
 
-    LOOP AT mt_installed_modules INTO wa_installed_module.
+    LOOP AT sdk_package_manager->mt_installed_modules INTO wa_installed_module.
 
       " Skip modules that are part of AWS_CORE
       IF wa_installed_module-tla = 'sts'
@@ -4134,8 +4210,8 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
 
 
-        wa_installed_module-avers = VALUE #( mt_available_modules_inst[ tla = wa_installed_module-tla ]-avers DEFAULT 'n.a.' ).
-        wa_installed_module-atransport = VALUE #( mt_available_modules_inst[ tla = wa_installed_module-tla ]-atransport DEFAULT 'n.a.' ).
+        wa_installed_module-avers = VALUE #( sdk_package_manager->mt_available_modules_inst[ tla = wa_installed_module-tla ]-avers DEFAULT 'n.a.' ).
+        wa_installed_module-atransport = VALUE #( sdk_package_manager->mt_available_modules_inst[ tla = wa_installed_module-tla ]-atransport DEFAULT 'n.a.' ).
 
         l_text = wa_installed_module-tla.
 
@@ -4202,7 +4278,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
 
 
-        IF mr_sdk_package_manager->job_manager->is_job_running( ).
+        IF sdk_package_manager->job_manager->is_job_running( ).
           lr_item->set_editable( abap_false ).
         ELSE.
           lr_item->set_editable( abap_true ).
@@ -4230,14 +4306,14 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
     lr_nodes = mr_tree->get_nodes( ).
 
-    DATA(l_inst_mod_no) = lines( mt_installed_modules ).
+    DATA(l_inst_mod_no) = lines( sdk_package_manager->mt_installed_modules ).
     IF l_inst_mod_no >= 4.
       l_inst_mod_no = l_inst_mod_no - 3.
     ENDIF.
-    DATA(l_inst_deprecated_mod_ins_no) = lines( mr_sdk_package_manager->get_sdk_deprecated_mod_inst( ) ).
-    DATA(l_avail_modules_no) = lines( mt_available_modules_inst ) - ( l_inst_mod_no - l_inst_deprecated_mod_ins_no ).
+    DATA(l_inst_deprecated_mod_ins_no) = lines( sdk_package_manager->get_sdk_deprecated_mod_inst( ) ).
+    DATA(l_avail_modules_no) = lines( sdk_package_manager->mt_available_modules_inst ) - ( l_inst_mod_no - l_inst_deprecated_mod_ins_no ).
 
-    IF lines( mt_installed_modules ) = 0.
+    IF lines( sdk_package_manager->mt_installed_modules ) = 0.
       l_avail_modules_no = l_avail_modules_no - 4.
     ENDIF.
 
@@ -4268,7 +4344,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
                    ir_node_key  = lr_key ) ##NO_TEXT.
 
     "------ Available Modules subfolder Popular Modules
-    DATA(l_popular_modules_no) = lines( mt_popular_modules ) - lines( FILTER #( mt_installed_modules IN mt_popular_modules WHERE tla = tla ) ).
+    DATA(l_popular_modules_no) = lines( mt_popular_modules ) - lines( FILTER #( sdk_package_manager->mt_installed_modules IN mt_popular_modules WHERE tla = tla ) ).
     DATA(l_popular_modules_text) = 'Popular Modules (' && l_popular_modules_no && ')' ##NO_TEXT.
     DATA(l_popular_modules_lvc) = CONV lvc_value( l_popular_modules_text ).
 
@@ -4313,11 +4389,11 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
 
     "------ Module list compilation
-    SORT mt_available_modules_inst BY tla.
+    SORT sdk_package_manager->mt_available_modules_inst BY tla.
 
     DATA wa_installed_module TYPE ts_sdk_module.
 
-    LOOP AT mt_available_modules_inst ASSIGNING FIELD-SYMBOL(<fs_available_module>).
+    LOOP AT sdk_package_manager->mt_available_modules_inst ASSIGNING FIELD-SYMBOL(<fs_available_module>).
       CLEAR: lr_node.
 
       IF <fs_available_module>-tla = 'core'.
@@ -4326,7 +4402,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
       ELSE.
         CLEAR wa_installed_module.
-        READ TABLE mt_installed_modules WITH KEY tla = <fs_available_module>-tla INTO wa_installed_module.
+        READ TABLE sdk_package_manager->mt_installed_modules WITH KEY tla = <fs_available_module>-tla INTO wa_installed_module.
         IF sy-subrc = 0.
           CONTINUE. " Module is already installed, skipping...
 
@@ -4403,7 +4479,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
       ENDIF.
 
 
-      IF mr_sdk_package_manager->job_manager->is_job_running( ).
+      IF sdk_package_manager->job_manager->is_job_running( ).
         lr_item->set_editable( abap_false ).
       ENDIF.
 
@@ -4427,11 +4503,11 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
 
     " Job already running?
-    IF mr_sdk_package_manager->job_manager->is_job_running( ).
+    IF sdk_package_manager->job_manager->is_job_running( ).
 
       " get job number
       DATA: lt_joblist TYPE tbtcjob_tt.
-      lt_joblist = mr_sdk_package_manager->job_manager->get_running_jobs( i_jobname = sy-repid ).
+      lt_joblist = sdk_package_manager->job_manager->get_running_jobs( i_jobname = sy-repid ).
       DATA wa_job TYPE tbtcjob.
       READ TABLE lt_joblist INTO wa_job INDEX 1.
       IF sy-subrc <> 0.
@@ -4483,18 +4559,18 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
   METHOD refresh.
 
-    mt_installed_modules = mr_sdk_package_manager->get_sdk_installed_modules( ).
+    sdk_package_manager->mt_installed_modules = sdk_package_manager->get_sdk_installed_modules( ).
 
-    mt_available_modules_inst = mr_sdk_package_manager->get_sdk_avail_modules_json( i_operation = 'install'
-                                                                                    i_source    = 'web'
-                                                                                    i_version   = 'LATEST' ).
+    sdk_package_manager->mt_available_modules_inst = sdk_package_manager->get_sdk_avail_modules_json( i_operation = 'install'
+                                                                                                      i_source    = 'web'
+                                                                                                      i_version   = 'LATEST' ).
 
-    mt_available_modules_uninst = mr_sdk_package_manager->get_sdk_avail_modules_json( i_operation = 'uninstall'
-                                                                                      i_source    = 'web'
-                                                                                      i_version   = 'LATEST' ).
+    sdk_package_manager->mt_available_modules_uninst = sdk_package_manager->get_sdk_avail_modules_json( i_operation = 'uninstall'
+                                                                                                        i_source    = 'web'
+                                                                                                        i_version   = 'LATEST' ).
 
 
-    IF NOT mr_sdk_package_manager->job_manager->is_job_running( ).
+    IF NOT sdk_package_manager->job_manager->is_job_running( ).
       CLEAR: mt_modules_to_be_installed.
       CLEAR: mt_modules_to_be_deleted.
     ENDIF.
@@ -4506,8 +4582,8 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
     MESSAGE |Refresh complete.| TYPE 'S' ##NO_TEXT.
 
-    IF mr_sdk_package_manager->job_manager->is_job_running( ).
-      lcl_ui_utils=>display_job_details_statusbar( i_job_manager = mr_sdk_package_manager->job_manager ).
+    IF sdk_package_manager->job_manager->is_job_running( ).
+      lcl_ui_utils=>display_job_details_statusbar( i_job_manager = sdk_package_manager->job_manager ).
     ENDIF.
 
   ENDMETHOD.
@@ -4532,7 +4608,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
         lr_functions = mr_tree->get_functions( ).
 
         " If a job is running we deactivate all buttons that could interfere with the running op
-        IF mr_sdk_package_manager->job_manager->is_job_running( ) = abap_true.
+        IF sdk_package_manager->job_manager->is_job_running( ) = abap_true.
           lr_functions->enable_function( name    = 'EXE_FGND'
                                          boolean = ' ' ).
           lr_functions->enable_function( name    = 'EXE_BGND'
@@ -4587,7 +4663,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
           lr_functions->enable_function( name    = 'BTC_DTLS'
                                          boolean = ' ' ).
 
-          IF lines( mt_installed_modules ) > 4.  " if core is installed, activate the select/deslected buttons
+          IF lines( sdk_package_manager->mt_installed_modules ) > 4.  " if core is installed, activate the select/deslected buttons
             lr_functions->enable_function( name    = 'UPD_INST'
                                            boolean = 'X' ).
             lr_functions->enable_function( name    = 'DES_INST'
@@ -4798,38 +4874,6 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
   ENDMETHOD.
 
-  METHOD is_core_installed.
-
-    DATA: lv_result TYPE abap_bool VALUE abap_false.
-
-    IF line_exists( mt_installed_modules[ tla = 'sts' ] )
-      AND line_exists( mt_installed_modules[ tla = 's3' ] )
-      AND line_exists( mt_installed_modules[ tla = 'smr' ] )
-      AND line_exists( mt_installed_modules[ tla = 'rla' ] ).
-      lv_result = abap_true.
-    ENDIF.
-
-    r_result = lv_result.
-
-  ENDMETHOD.
-
-  METHOD is_version_latest.
-
-    TRY.
-        DATA(lt_latest_inst_modules) = mr_sdk_package_manager->get_sdk_avail_modules_json( i_operation = 'install'
-                                                                                           i_source    = 'web'
-                                                                                           i_version   = 'LATEST' ).
-      CATCH lcx_error.
-    ENDTRY.
-
-    IF i_version = lt_latest_inst_modules[ tla = 'core' ]-avers.
-      r_result = abap_true.
-    ELSE.
-      r_result = abap_false.
-    ENDIF.
-
-  ENDMETHOD.
-
   METHOD get_modules_to_be_installed.
     DATA lr_selections TYPE REF TO cl_salv_selections_tree.
     DATA lr_nodes TYPE REF TO cl_salv_nodes.
@@ -4966,285 +5010,6 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD check_selection_mod_thresholds.
-
-    DATA lv_text TYPE string.
-    DATA lv_answer TYPE c.
-
-    CASE i_op.
-
-      WHEN 'install'.
-        DATA(lv_number_modules_inst) = lines( it_modules_tbi ).
-        DATA(lv_number_new_modules) = 0.
-        DATA(lv_number_modules_avail_inst) = lines( mt_available_modules_inst ).
-
-        " determine modules to be net newly installed
-        LOOP AT it_modules_tbi INTO DATA(wa_module_tbi).
-          IF ( wa_module_tbi-tla <> 'core' ) AND NOT line_exists( mt_installed_modules[ tla = wa_module_tbi-tla ] ).
-            lv_number_new_modules = lv_number_new_modules + 1.
-            lv_number_modules_inst = lv_number_modules_inst - 1.
-          ENDIF.
-
-          IF ( wa_module_tbi-tla = 'core' ) AND ( NOT is_core_installed( ) ).
-            lv_number_new_modules = lv_number_new_modules + 1.
-            lv_number_modules_inst = lv_number_modules_inst - 1.
-          ENDIF.
-
-        ENDLOOP.
-
-
-        IF ( lv_number_modules_inst + lv_number_new_modules ) >= lv_number_modules_avail_inst.
-          lv_text = |You have selected all { lv_number_modules_inst + lv_number_new_modules } modules available for installation. |
-                 && |Having all modules installed is discouraged and should only be done in demo systems. |
-                 && |Continue? | ##NO_TEXT.
-
-          CALL FUNCTION 'POPUP_TO_CONFIRM'
-            EXPORTING
-              titlebar              = ' '
-              diagnose_object       = ' '
-              text_question         = lv_text
-              text_button_1         = |Do it anyway|
-              icon_button_1         = ' '
-              text_button_2         = |Go back|
-              icon_button_2         = ' '
-              default_button        = '2'
-              display_cancel_button = ' '
-              userdefined_f1_help   = ' '
-              start_column          = 25
-              start_row             = 6
-              iv_quickinfo_button_1 = ' '
-              iv_quickinfo_button_2 = ' '
-            IMPORTING
-              answer                = lv_answer
-            EXCEPTIONS
-              text_not_found        = 1
-              OTHERS                = 2 ##NO_TEXT.
-          IF sy-subrc <> 0.
-            RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
-          ENDIF.
-
-          IF lv_answer = 1.
-            r_result = abap_true.
-          ELSE.
-            r_result = abap_false.
-            RETURN.
-          ENDIF.
-
-        ENDIF.
-
-        IF ( lv_number_new_modules > lif_ui_constants=>c_batch_rec_threshold OR lv_number_modules_inst > lif_ui_constants=>c_batch_rec_threshold )
-            AND ( i_salv_function = 'STRT' OR i_salv_function = 'EXE_FGND' OR i_salv_function = 'INS_FGND' ).
-          lv_text = |You have selected { lv_number_new_modules + lv_number_modules_inst } modules for installation (or update). |
-                 & |This can take a while (using batch mode is recommended). |
-                 & |Continue with foreground mode? | ##NO_TEXT.
-
-          CALL FUNCTION 'POPUP_TO_CONFIRM'
-            EXPORTING
-              titlebar              = ' '
-              diagnose_object       = ' '
-              text_question         = lv_text
-              text_button_1         = |Yes, please|
-              icon_button_1         = ' '
-              text_button_2         = |Go back|
-              icon_button_2         = ' '
-              default_button        = '2'
-              display_cancel_button = ' '
-              userdefined_f1_help   = ' '
-              start_column          = 25
-              start_row             = 6
-              iv_quickinfo_button_1 = ' '
-              iv_quickinfo_button_2 = ' '
-            IMPORTING
-              answer                = lv_answer
-            EXCEPTIONS
-              text_not_found        = 1
-              OTHERS                = 2 ##NO_TEXT.
-          IF sy-subrc <> 0.
-            RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
-          ENDIF.
-
-          IF lv_answer = 1.
-            r_result = abap_true.
-          ELSE.
-            r_result = abap_false.
-          ENDIF.
-
-        ELSE.
-          r_result = abap_true.
-        ENDIF.
-
-        RETURN.
-
-      WHEN 'uninstall'.
-
-        DATA(lv_number_modules_tbd) = lines( it_modules_tbd ).
-
-        IF lv_number_modules_tbd > lif_ui_constants=>c_batch_rec_threshold
-            AND ( i_salv_function = 'STRT' OR i_salv_function = 'EXE_FGND' OR i_salv_function = 'DEL_FGND' ).
-          lv_text = |You have selected { lv_number_modules_tbd } modules for deletion. |
-                         && |This can take a while (using batch mode is recommended). |
-                         && |Continue in foreground mode? | ##NO_TEXT.
-
-          CALL FUNCTION 'POPUP_TO_CONFIRM'
-            EXPORTING
-              titlebar              = ' '
-              diagnose_object       = ' '
-              text_question         = lv_text
-              text_button_1         = |Yes, please|
-              icon_button_1         = ' '
-              text_button_2         = |Go back|
-              icon_button_2         = ' '
-              default_button        = '2'
-              display_cancel_button = ' '
-              userdefined_f1_help   = ' '
-              start_column          = 25
-              start_row             = 6
-              iv_quickinfo_button_1 = ' '
-              iv_quickinfo_button_2 = ' '
-            IMPORTING
-              answer                = lv_answer
-            EXCEPTIONS
-              text_not_found        = 1
-              OTHERS                = 2 ##NO_TEXT.
-          IF sy-subrc <> 0.
-            RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
-          ENDIF.
-
-          IF lv_answer = 1.
-            r_result = abap_true.
-          ELSE.
-            r_result = abap_false.
-          ENDIF.
-
-        ELSE.
-          r_result = abap_true.
-        ENDIF.
-
-        RETURN.
-      WHEN OTHERS.
-
-    ENDCASE.
-
-  ENDMETHOD.
-
-  METHOD check_selection_core_validity.
-
-    DATA: lv_result TYPE abap_bool VALUE abap_false.
-
-    CASE i_op.
-
-      WHEN 'install'.
-
-        IF is_core_installed( ) = abap_false                            " core is NOT installed
-          AND NOT line_exists( it_modules_tbi[ tla = 'core' ] )  " and NOT selected for installation
-          AND lines( it_modules_tbi ) > 0.                              " are other modules selected for installation?
-          MESSAGE |Please install core module with first deployment.| TYPE 'S' DISPLAY LIKE 'E' ##NO_TEXT.
-          lv_result = abap_false.                                       " then block the request
-
-        ELSEIF is_core_installed( ) = abap_true                         " core is installed
-            AND line_exists( it_modules_tbd[ tla = 'core' ] )    " and marked for deletion
-            AND ( lines( it_modules_tbd ) < lines( mt_installed_modules ) - 3    " are any installed modules NOT selected for deletion?
-            OR lines( it_modules_tbi ) > 0 ).                                   " or did the user select additional modules for installation?
-          MESSAGE |To delete core, additionally mark all installed modules for deletion.| TYPE 'S' DISPLAY LIKE 'E' ##NO_TEXT.
-          lv_result = abap_false.                                       " then block the request
-
-        ELSE.
-          lv_result = abap_true.
-        ENDIF.
-
-      WHEN 'uninstall'.
-
-        IF is_core_installed( ) = abap_true                           " core is installed
-            AND line_exists( it_modules_tbd[ tla = 'core' ] )  " and marked for deletion
-            AND ( lines( it_modules_tbd ) < lines( mt_installed_modules ) - 3 " are any installed modules NOT selected for deletion?
-            OR lines( it_modules_tbi ) > 0 ).                                " or did the user select additional modules for installation?
-          MESSAGE |To delete core, additionally mark all installed modules for deletion.| TYPE 'S' DISPLAY LIKE 'E' ##NO_TEXT.
-          lv_result = abap_false.                                           " then block the request
-        ELSE.
-          lv_result = abap_true.
-        ENDIF.
-
-    ENDCASE.
-
-    r_result = lv_result.
-
-  ENDMETHOD.
-
-
-  METHOD check_selection_populated.
-
-    DATA: lv_result TYPE abap_bool VALUE abap_false.
-
-    CASE i_op.
-
-      WHEN 'install'.
-
-        IF lines( it_modules_tbi ) + lines( it_modules_tbd ) > 0.
-          lv_result = abap_true.
-        ELSE.
-          MESSAGE |Nothing to do.| TYPE 'S' ##NO_TEXT.
-          lv_result = abap_false.
-        ENDIF.
-
-      WHEN 'uninstall'.
-
-        IF lines( it_modules_tbd ) > 0.
-          lv_result = abap_true.
-        ELSE.
-          MESSAGE |Nothing to do.| TYPE 'S' ##NO_TEXT.
-          lv_result = abap_false.
-        ENDIF.
-
-    ENDCASE.
-
-    r_result = lv_result.
-
-  ENDMETHOD.
-
-
-  METHOD check_selection_sanity.
-
-    DATA: lv_result_populated TYPE abap_bool VALUE abap_false.
-    DATA: lv_result_core_validity TYPE abap_bool VALUE abap_false.
-    DATA: lv_result_mod_thresholds TYPE abap_bool VALUE abap_false.
-
-    lv_result_populated = check_selection_populated( it_modules_tbi  = it_modules_tbi
-                                                     it_modules_tbd  = it_modules_tbd
-                                                     i_op            = i_op
-                                                     i_salv_function = i_salv_function ).
-
-    IF lv_result_populated = abap_false.
-      r_result = abap_false.
-      RETURN.
-    ENDIF.
-
-    lv_result_core_validity = check_selection_core_validity( it_modules_tbi  = it_modules_tbi
-                                                             it_modules_tbd  = it_modules_tbd
-                                                             i_op            = i_op
-                                                             i_salv_function = i_salv_function ).
-
-    IF lv_result_core_validity = abap_false.
-      r_result = abap_false.
-      RETURN.
-    ENDIF.
-
-    lv_result_mod_thresholds = check_selection_mod_thresholds( it_modules_tbi  = it_modules_tbi
-                                                               it_modules_tbd  = it_modules_tbd
-                                                               i_op            = i_op
-                                                               i_salv_function = i_salv_function ).
-
-    IF lv_result_mod_thresholds = abap_false.
-      r_result = abap_false.
-      RETURN.
-    ENDIF.
-
-
-    r_result = abap_true.
-
-
-  ENDMETHOD.
-
-
   METHOD handle_user_command.
 
 
@@ -5277,30 +5042,31 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
             INSERT LINES OF mt_modules_to_be_updated INTO TABLE mt_modules_to_be_installed.
 
-            IF check_selection_sanity( it_modules_tbi = mt_modules_to_be_installed
+            IF lcl_ui_selection_validator=>validate_selection( it_modules_tbi = mt_modules_to_be_installed
                                        it_modules_tbd = mt_modules_to_be_deleted
                                        i_salv_function = e_salv_function
-                                       i_op = 'install' ) = abap_false.
+                                       i_op = 'install'
+                                       i_tree_controller = me ) = abap_false.
               RETURN.
             ENDIF.
 
             IF lines( mt_modules_to_be_installed ) > 0
               OR lines( mt_modules_to_be_deleted ) > 0
               OR lines( mt_modules_to_be_updated ) > 0.
-              IF mr_sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = lv_target_version ) = abap_false.
+              IF sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = lv_target_version ) = abap_false.
                 RETURN.
               ENDIF.
 
-              IF mr_sdk_package_manager->update_zipfiles_if_outdated( i_avers_core_inst = mt_available_modules_inst[ tla = 'core' ]-avers
-                                      i_avers_core_uninst = mt_available_modules_uninst[ tla = 'core' ]-avers ) = abap_false.
+              IF sdk_package_manager->update_zipfiles_if_outdated( i_avers_core_inst = sdk_package_manager->mt_available_modules_inst[ tla = 'core' ]-avers
+                                      i_avers_core_uninst = sdk_package_manager->mt_available_modules_uninst[ tla = 'core' ]-avers ) = abap_false.
                 RETURN.
               ENDIF.
 
             ENDIF.
 
-            mr_sdk_package_manager->run_foreground( i_modules_to_be_installed = mt_modules_to_be_installed
-                                                    i_modules_to_be_deleted   = mt_modules_to_be_deleted
-                                                    i_target_version          = lv_target_version ).
+            sdk_package_manager->run_foreground( i_modules_to_be_installed = mt_modules_to_be_installed
+                                                 i_modules_to_be_deleted   = mt_modules_to_be_deleted
+                                                 i_target_version          = lv_target_version ).
             refresh( ).
 
           WHEN 'BTCH' OR 'EXE_BGND'.
@@ -5317,10 +5083,11 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
             INSERT LINES OF mt_modules_to_be_updated INTO TABLE mt_modules_to_be_installed.
 
-            IF check_selection_sanity( it_modules_tbi = mt_modules_to_be_installed
+            IF lcl_ui_selection_validator=>validate_selection( it_modules_tbi = mt_modules_to_be_installed
                                       it_modules_tbd = mt_modules_to_be_deleted
                                       i_salv_function = e_salv_function
-                                      i_op = 'install' ) = abap_false.
+                                      i_op = 'install'
+                                      i_tree_controller = me ) = abap_false.
               RETURN.
             ENDIF.
 
@@ -5328,12 +5095,12 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
             IF lines( mt_modules_to_be_installed ) > 0
               OR lines( mt_modules_to_be_deleted ) > 0
               OR lines( mt_modules_to_be_updated ) > 0.
-              IF mr_sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = lv_target_version ) = abap_false.
+              IF sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = lv_target_version ) = abap_false.
                 RETURN.
               ENDIF.
 
-              IF mr_sdk_package_manager->update_zipfiles_if_outdated( i_avers_core_inst = mt_available_modules_inst[ tla = 'core' ]-avers
-                                      i_avers_core_uninst = mt_available_modules_uninst[ tla = 'core' ]-avers ) = abap_false.
+              IF sdk_package_manager->update_zipfiles_if_outdated( i_avers_core_inst = sdk_package_manager->mt_available_modules_inst[ tla = 'core' ]-avers
+                                      i_avers_core_uninst = sdk_package_manager->mt_available_modules_uninst[ tla = 'core' ]-avers ) = abap_false.
                 RETURN.
               ENDIF.
 
@@ -5341,9 +5108,9 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
 
 
-            l_jobnumber = mr_sdk_package_manager->job_manager->submit_batch_job( i_modules_to_be_installed = mt_modules_to_be_installed
-                                                                                 i_modules_to_be_deleted   = mt_modules_to_be_deleted
-                                                                                 i_target_version          = lv_target_version ).
+            l_jobnumber = sdk_package_manager->job_manager->submit_batch_job( i_modules_to_be_installed = mt_modules_to_be_installed
+                                                                              i_modules_to_be_deleted   = mt_modules_to_be_deleted
+                                                                              i_target_version          = lv_target_version ).
 
             CONCATENATE `Submitted job with number ` l_jobnumber INTO l_job_message ##NO_TEXT.
             MESSAGE i000(0k) WITH l_job_message.
@@ -5354,9 +5121,9 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
             " we only use the same version as core (given it is installed at all)
             " if the installed version of core is the NOT the latest version
-            IF is_core_installed( ) = abap_true.
-              IF NOT is_version_latest( mt_installed_modules[ tla = 'sts' ]-cvers ).
-                lv_target_version = mt_installed_modules[ tla = 'sts' ]-cvers.
+            IF sdk_package_manager->is_core_installed( ) = abap_true.
+              IF NOT sdk_package_manager->is_version_latest( sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-cvers ).
+                lv_target_version = sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-cvers.
               ELSE.
                 lv_target_version = 'LATEST'.
               ENDIF.
@@ -5369,33 +5136,34 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
             mt_modules_to_be_installed = get_modules_to_be_installed( i_target_version = lv_target_version ).
 
 
-            IF check_selection_sanity( it_modules_tbi = mt_modules_to_be_installed
+            IF lcl_ui_selection_validator=>validate_selection( it_modules_tbi = mt_modules_to_be_installed
                                        it_modules_tbd = mt_modules_to_be_deleted
                                        i_salv_function = e_salv_function
-                                       i_op = 'install' ) = abap_false.
+                                       i_op = 'install'
+                                       i_tree_controller = me ) = abap_false.
               RETURN.
             ENDIF.
 
             IF lines( mt_modules_to_be_installed ) > 0.
 
-              IF mr_sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = lv_target_version ) = abap_false.
+              IF sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = lv_target_version ) = abap_false.
                 RETURN.
               ENDIF.
 
             ENDIF.
 
-            mr_sdk_package_manager->run_foreground( i_modules_to_be_installed = mt_modules_to_be_installed
-                                                    i_modules_to_be_deleted   = mt_modules_to_be_deleted
-                                                    i_target_version          = lv_target_version ). " empty since modules tbd are not collected here
+            sdk_package_manager->run_foreground( i_modules_to_be_installed = mt_modules_to_be_installed
+                                                 i_modules_to_be_deleted   = mt_modules_to_be_deleted
+                                                 i_target_version          = lv_target_version ). " empty since modules tbd are not collected here
             refresh( ).
 
           WHEN 'INS_BGND'.
 
             " we only use the same version as core (given it is installed at all)
             " if the installed version of core is the NOT the latest version
-            IF is_core_installed( ) = abap_true.
-              IF NOT is_version_latest( mt_installed_modules[ tla = 'sts' ]-cvers ).
-                lv_target_version = mt_installed_modules[ tla = 'sts' ]-cvers.
+            IF sdk_package_manager->is_core_installed( ) = abap_true.
+              IF NOT sdk_package_manager->is_version_latest( sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-cvers ).
+                lv_target_version = sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-cvers.
               ELSE.
                 lv_target_version = 'LATEST'.
               ENDIF.
@@ -5409,24 +5177,25 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
             mt_modules_to_be_installed = get_modules_to_be_installed( i_target_version = lv_target_version ).
 
 
-            IF check_selection_sanity( it_modules_tbi = mt_modules_to_be_installed
+            IF lcl_ui_selection_validator=>validate_selection( it_modules_tbi = mt_modules_to_be_installed
                                                    it_modules_tbd = mt_modules_to_be_deleted
                                                    i_salv_function = e_salv_function
-                                                   i_op = 'install' ) = abap_false.
+                                                   i_op = 'install'
+                                                   i_tree_controller = me ) = abap_false.
               RETURN.
             ENDIF.
 
             IF lines( mt_modules_to_be_installed ) > 0.
 
-              IF mr_sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = lv_target_version ) = abap_false.
+              IF sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = lv_target_version ) = abap_false.
                 RETURN.
               ENDIF.
 
             ENDIF.
 
-            l_jobnumber = mr_sdk_package_manager->job_manager->submit_batch_job( i_modules_to_be_installed = mt_modules_to_be_installed
-                                                                                 i_modules_to_be_deleted   = mt_modules_to_be_deleted
-                                                                                 i_target_version          = lv_target_version ). " empty since modules tbd are not collected here
+            l_jobnumber = sdk_package_manager->job_manager->submit_batch_job( i_modules_to_be_installed = mt_modules_to_be_installed
+                                                                              i_modules_to_be_deleted   = mt_modules_to_be_deleted
+                                                                              i_target_version          = lv_target_version ). " empty since modules tbd are not collected here
 
             CONCATENATE `Submitted job with number ` l_jobnumber INTO l_job_message ##NO_TEXT.
             MESSAGE i000(0k) WITH l_job_message.
@@ -5437,9 +5206,9 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
             " we only use the same version as core (given it is installed at all)
             " if the installed version of core is NOT the latest version
-            IF is_core_installed( ) = abap_true.
-              IF NOT is_version_latest( mt_installed_modules[ tla = 'sts' ]-cvers ).
-                lv_target_version = mt_installed_modules[ tla = 'sts' ]-cvers.
+            IF sdk_package_manager->is_core_installed( ) = abap_true.
+              IF NOT sdk_package_manager->is_version_latest( sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-cvers ).
+                lv_target_version = sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-cvers.
               ELSE.
                 lv_target_version = 'LATEST'.
               ENDIF.
@@ -5453,33 +5222,34 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
             mt_modules_to_be_deleted = get_modules_to_be_deleted( i_target_version = lv_target_version ).
 
 
-            IF check_selection_sanity( it_modules_tbi = mt_modules_to_be_installed
+            IF lcl_ui_selection_validator=>validate_selection( it_modules_tbi = mt_modules_to_be_installed
                                        it_modules_tbd = mt_modules_to_be_deleted
                                        i_salv_function = e_salv_function
-                                       i_op = 'uninstall' ) = abap_false.
+                                       i_op = 'uninstall'
+                                       i_tree_controller = me ) = abap_false.
               RETURN.
             ENDIF.
 
             IF lines( mt_modules_to_be_deleted ) > 0.
 
-              IF mr_sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = lv_target_version ) = abap_false.
+              IF sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = lv_target_version ) = abap_false.
                 RETURN.
               ENDIF.
 
             ENDIF.
 
-            mr_sdk_package_manager->run_foreground( i_modules_to_be_installed = mt_modules_to_be_installed " empty since modules tbi are not collected here
-                                                    i_modules_to_be_deleted   = mt_modules_to_be_deleted
-                                                    i_target_version          = lv_target_version ).
+            sdk_package_manager->run_foreground( i_modules_to_be_installed = mt_modules_to_be_installed " empty since modules tbi are not collected here
+                                                 i_modules_to_be_deleted   = mt_modules_to_be_deleted
+                                                 i_target_version          = lv_target_version ).
             refresh( ).
 
           WHEN 'DEL_BGND'.
 
             " we only use the same version as core (given it is installed at all)
             " if the installed version of core is  NOT the latest version
-            IF is_core_installed( ) = abap_true.
-              IF NOT is_version_latest( mt_installed_modules[ tla = 'sts' ]-cvers ).
-                lv_target_version = mt_installed_modules[ tla = 'sts' ]-cvers.
+            IF sdk_package_manager->is_core_installed( ) = abap_true.
+              IF NOT sdk_package_manager->is_version_latest( sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-cvers ).
+                lv_target_version = sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-cvers.
               ELSE.
                 lv_target_version = 'LATEST'.
               ENDIF.
@@ -5493,24 +5263,25 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
             mt_modules_to_be_deleted = get_modules_to_be_deleted( i_target_version = lv_target_version ).
 
 
-            IF check_selection_sanity( it_modules_tbi = mt_modules_to_be_installed
+            IF lcl_ui_selection_validator=>validate_selection( it_modules_tbi = mt_modules_to_be_installed
                                                    it_modules_tbd = mt_modules_to_be_deleted
                                                    i_salv_function = e_salv_function
-                                                   i_op = 'uninstall' ) = abap_false.
+                                                   i_op = 'uninstall'
+                                                   i_tree_controller = me ) = abap_false.
               RETURN.
             ENDIF.
 
             IF lines( mt_modules_to_be_deleted ) > 0.
 
-              IF mr_sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = lv_target_version ) = abap_false.
+              IF sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = lv_target_version ) = abap_false.
                 RETURN.
               ENDIF.
 
             ENDIF.
 
-            l_jobnumber = mr_sdk_package_manager->job_manager->submit_batch_job( i_modules_to_be_installed = mt_modules_to_be_installed " empty since modules tbi are not collected here
-                                                                                 i_modules_to_be_deleted   = mt_modules_to_be_deleted
-                                                                                 i_target_version          = lv_target_version ).
+            l_jobnumber = sdk_package_manager->job_manager->submit_batch_job( i_modules_to_be_installed = mt_modules_to_be_installed " empty since modules tbi are not collected here
+                                                                              i_modules_to_be_deleted   = mt_modules_to_be_deleted
+                                                                              i_target_version          = lv_target_version ).
 
             CONCATENATE `Submitted job with number ` l_jobnumber INTO l_job_message ##NO_TEXT.
             MESSAGE i000(0k) WITH l_job_message.
@@ -5562,7 +5333,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
           WHEN 'DOW_TRAK'.
 
-            mr_sdk_package_manager->sdk_zipfiles->download_zipfile_pair( i_version = 'LATEST' ).
+            sdk_package_manager->sdk_zipfiles->download_zipfile_pair( i_version = 'LATEST' ).
 
           WHEN 'INS_ALL'.
 
@@ -5604,15 +5375,15 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
         WHEN abap_true.
 
-          IF is_core_installed( ) = abap_false.
+          IF sdk_package_manager->is_core_installed( ) = abap_false.
             wa_row-op_text = 'Will be installed.' ##NO_TEXT.
             wa_row-op_icon = '@08@'.
             wa_row-op_code = lif_ui_constants=>c_operation_install.
             l_node->set_data_row( wa_row ).
 
           ELSE.
-            IF lcl_sdk_utils=>cmp_version_string( i_string1 = mt_installed_modules[ tla = 'sts' ]-avers
-                                                          i_string2 = mt_installed_modules[ tla = 'sts' ]-cvers ) = 1.
+            IF lcl_sdk_utils=>cmp_version_string( i_string1 = sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-avers
+                                                          i_string2 = sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-cvers ) = 1.
               wa_row-op_text = 'Module will be updated.' ##NO_TEXT.
               wa_row-op_icon = '@09@'.
               wa_row-op_code = lif_ui_constants=>c_operation_update.
@@ -5627,7 +5398,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
         WHEN abap_false.
 
-          IF is_core_installed( ) = abap_true.
+          IF sdk_package_manager->is_core_installed( ) = abap_true.
             wa_row-op_text = 'Will be deleted.' ##NO_TEXT.
             wa_row-op_icon = '@0A@'.
             wa_row-op_code = lif_ui_constants=>c_operation_delete.
@@ -5650,21 +5421,21 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
         WHEN abap_true.
 
-          IF VALUE #( mt_installed_modules[ tla = l_tla ] OPTIONAL ) IS INITIAL .
+          IF VALUE #( sdk_package_manager->mt_installed_modules[ tla = l_tla ] OPTIONAL ) IS INITIAL .
             wa_row-op_text = 'Will be installed.' ##NO_TEXT.
             wa_row-op_icon = '@08@'.
             wa_row-op_code = lif_ui_constants=>c_operation_install.
             l_node->set_data_row( wa_row ).
 
           ELSE.
-            IF lcl_sdk_utils=>cmp_version_string( i_string1 = mt_installed_modules[ tla = l_tla ]-avers
-                                                          i_string2 = mt_installed_modules[ tla = l_tla ]-cvers ) = 1.
+            IF lcl_sdk_utils=>cmp_version_string( i_string1 = sdk_package_manager->mt_installed_modules[ tla = l_tla ]-avers
+                                                          i_string2 = sdk_package_manager->mt_installed_modules[ tla = l_tla ]-cvers ) = 1.
               wa_row-op_text = 'Module will be updated.' ##NO_TEXT.
               wa_row-op_icon = '@09@' ##NO_TEXT.
               wa_row-op_code = lif_ui_constants=>c_operation_update.
               l_node->set_data_row( wa_row ).
-            ELSEIF lcl_sdk_utils=>cmp_version_string( i_string1 = mt_installed_modules[ tla = l_tla ]-avers
-                                                          i_string2 = mt_installed_modules[ tla = l_tla ]-cvers ) = 0.
+            ELSEIF lcl_sdk_utils=>cmp_version_string( i_string1 = sdk_package_manager->mt_installed_modules[ tla = l_tla ]-avers
+                                                          i_string2 = sdk_package_manager->mt_installed_modules[ tla = l_tla ]-cvers ) = 0.
               wa_row-op_text = 'Module up to date, no operation planned.' ##NO_TEXT.
               wa_row-op_icon = '@08@' ##NO_TEXT.
               wa_row-op_code = lif_ui_constants=>c_operation_none.
@@ -5680,7 +5451,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
         WHEN abap_false.
 
-          IF VALUE #( mt_installed_modules[ tla = l_tla ] OPTIONAL ) IS NOT INITIAL.
+          IF VALUE #( sdk_package_manager->mt_installed_modules[ tla = l_tla ] OPTIONAL ) IS NOT INITIAL.
             wa_row-op_text = 'Will be deleted.' ##NO_TEXT.
             wa_row-op_icon = '@0A@'.
             wa_row-op_code = lif_ui_constants=>c_operation_delete.
@@ -5812,7 +5583,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
   METHOD toggle_inst_modules.
 
-    IF lines( mt_installed_modules ) > 0.
+    IF lines( sdk_package_manager->mt_installed_modules ) > 0.
 
       TRY.
           DATA(lr_inst_mods_nodes) = mr_tree->get_nodes( )->get_node( node_key = mt_folder_node_keys[ node_name = 'installed_modules' ]-key )->get_children( ).
@@ -5838,6 +5609,8 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
   ENDMETHOD.
 ENDCLASS.
+
+
 
 
 CLASS lcl_main DEFINITION FINAL.
