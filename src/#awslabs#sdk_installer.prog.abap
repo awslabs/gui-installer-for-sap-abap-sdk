@@ -55,7 +55,7 @@ CLASS lcl_ui_command_base DEFINITION DEFERRED.
 "CLASS lcl_ui_command_exe_btc DEFINITION DEFERRED.
 "CLASS lcl_ui_command_ins_dia DEFINITION DEFERRED.
 "CLASS lcl_ui_command_ins_btc DEFINITION DEFERRED.
-"CLASS lcl_ui_command_del_dia DEFINITION DEFERRED.
+CLASS lcl_ui_command_del_dia DEFINITION DEFERRED.
 CLASS lcl_ui_command_del_btc DEFINITION DEFERRED.
 CLASS lcl_ui_command_ins_all DEFINITION DEFERRED.
 CLASS lcl_ui_command_dow_crt DEFINITION DEFERRED.
@@ -2976,13 +2976,10 @@ CLASS lcl_ui_tree_controller DEFINITION FINAL.
 
 
     DATA:
-      sdk_package_manager          TYPE REF TO lcl_sdk_package_manager,
+      sdk_package_manager          TYPE REF TO lcl_sdk_package_manager READ-ONLY,
       mr_container                 TYPE REF TO cl_gui_container,
       mr_tree                      TYPE REF TO cl_salv_tree,
       mt_treetab                   TYPE tt_sdk_module,
-      "      mt_installed_modules         TYPE tt_sdk_module,
-      "      mt_available_modules_inst    TYPE tt_sdk_module,
-      "      mt_available_modules_uninst  TYPE tt_sdk_module,
       mt_popular_modules           TYPE tt_sdk_tla,
       mt_modules_to_be_installed   TYPE tt_sdk_tla,
       mt_modules_to_be_deleted     TYPE tt_sdk_tla,
@@ -2998,7 +2995,7 @@ CLASS lcl_ui_tree_controller DEFINITION FINAL.
       fill_container_content FOR if_salv_csqt_content_manager~fill_container_content.
 
     METHODS:
-      constructor IMPORTING ir_sdk_package_manager TYPE REF TO lcl_sdk_package_manager
+      constructor IMPORTING i_sdk_package_manager TYPE REF TO lcl_sdk_package_manager
                   RAISING   lcx_error,
       get_modules_to_be_installed IMPORTING i_target_version                  TYPE string
                                   RETURNING VALUE(rt_modules_to_be_installed) TYPE tt_sdk_tla,
@@ -3348,6 +3345,7 @@ CLASS lcl_ui_utils DEFINITION FINAL.
     CLASS-METHODS:
       get_running_jobs_message IMPORTING i_job_manager    TYPE REF TO lif_sdk_job_manager
                                RETURNING VALUE(r_message) TYPE string,
+      display_job_submitted_message IMPORTING i_job_number  TYPE btcjobcnt,
       confirm_install_all RETURNING VALUE(r_result) TYPE abap_bool RAISING lcx_error,
       display_job_details_statusbar IMPORTING i_job_manager    TYPE REF TO lif_sdk_job_manager,
       is_fullscreen IMPORTING i_container     TYPE REF TO cl_gui_container
@@ -3358,6 +3356,11 @@ CLASS lcl_ui_utils DEFINITION FINAL.
 ENDCLASS.
 
 CLASS lcl_ui_utils IMPLEMENTATION.
+
+  METHOD display_job_submitted_message.
+    CONCATENATE `Submitted job with number ` i_job_number INTO data(job_message) ##NO_TEXT.
+    MESSAGE i000(0k) WITH job_message.
+  ENDMETHOD.
 
   METHOD get_running_jobs_message.
 
@@ -3509,6 +3512,7 @@ CLASS lcl_ui_command_base DEFINITION ABSTRACT.
 
 ENDCLASS.
 
+
 CLASS lcl_ui_command_base IMPLEMENTATION.
 
   METHOD constructor.
@@ -3530,64 +3534,123 @@ CLASS lcl_ui_command_base IMPLEMENTATION.
 ENDCLASS.
 
 
+CLASS lcl_ui_command_del_dia DEFINITION INHERITING FROM lcl_ui_command_base FINAL.
+  PUBLIC SECTION.
+    METHODS:
+      lif_ui_command~execute REDEFINITION,
+      lif_ui_command~can_execute REDEFINITION.
+
+  PROTECTED SECTION.
+    DATA:
+       target_version TYPE string.
+
+    METHODS:
+      get_target_version REDEFINITION.
+ENDCLASS.
+
+
+CLASS lcl_ui_command_del_dia IMPLEMENTATION.
+  METHOD lif_ui_command~execute.
+    tree_controller->sdk_package_manager->run_foreground( i_modules_to_be_installed = tree_controller->mt_modules_to_be_installed " empty since modules tbi are not collected here
+                                                          i_modules_to_be_deleted   = tree_controller->mt_modules_to_be_deleted
+                                                          i_target_version          = get_target_version( ) ).
+    tree_controller->refresh( ).
+  ENDMETHOD.
+
+  METHOD lif_ui_command~can_execute.
+    CLEAR: tree_controller->mt_modules_to_be_installed.
+    CLEAR: tree_controller->mt_modules_to_be_deleted.
+    tree_controller->mt_modules_to_be_deleted = tree_controller->get_modules_to_be_deleted( i_target_version = get_target_version( ) ).
+
+
+    CHECK lcl_ui_selection_validator=>validate_selection( it_modules_tbi = tree_controller->mt_modules_to_be_installed
+                               it_modules_tbd = tree_controller->mt_modules_to_be_deleted
+                               i_salv_function = 'DEL_FGND'
+                               i_op = 'uninstall'
+                               i_tree_controller = tree_controller ).
+    CHECK lines( tree_controller->mt_modules_to_be_deleted ) > 0.
+    CHECK tree_controller->sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ) = abap_false.
+  ENDMETHOD.
+
+  METHOD get_target_version.
+    "  Return cached version if already determined
+    IF target_version IS NOT INITIAL.
+      r_version = target_version.
+      RETURN.
+    ENDIF.
+    " we only use the same version as core (given it is installed at all)
+    " if the installed version of core is NOT the latest version
+    IF tree_controller->sdk_package_manager->is_core_installed( ) = abap_true.
+      IF NOT tree_controller->sdk_package_manager->is_version_latest( tree_controller->sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-cvers ).
+        target_version = tree_controller->sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-cvers.
+      ELSE.
+        target_version = 'LATEST'.
+      ENDIF.
+    ELSE.
+      target_version = 'LATEST'.
+    ENDIF.
+  ENDMETHOD.
+ENDCLASS.
+
+
 CLASS lcl_ui_command_del_btc DEFINITION INHERITING FROM lcl_ui_command_base FINAL.
   PUBLIC SECTION.
     METHODS:
       lif_ui_command~execute REDEFINITION,
       lif_ui_command~can_execute REDEFINITION.
+
+  PROTECTED SECTION.
+    DATA:
+      target_version TYPE string.
+
+    METHODS:
+      get_target_version REDEFINITION.
 ENDCLASS.
 
+
 CLASS lcl_ui_command_del_btc IMPLEMENTATION.
-  METHOD lif_ui_command~execute.
 
-    DATA:lv_target_version TYPE string.
-
-    " we only use the same version as core (given it is installed at all)
-    " if the installed version of core is  NOT the latest version
-    IF tree_controller->sdk_package_manager->is_core_installed( ) = abap_true.
-      IF NOT tree_controller->sdk_package_manager->is_version_latest( tree_controller->sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-cvers ).
-        lv_target_version = tree_controller->sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-cvers.
-      ELSE.
-        lv_target_version = 'LATEST'.
-      ENDIF.
-    ELSE.
-      lv_target_version = 'LATEST'.
-    ENDIF.
-
-
-    CLEAR: tree_controller->mt_modules_to_be_installed.
-    CLEAR: tree_controller->mt_modules_to_be_deleted.
-    tree_controller->mt_modules_to_be_deleted = tree_controller->get_modules_to_be_deleted( i_target_version = lv_target_version )..
-
-
-    IF lcl_ui_selection_validator=>validate_selection( it_modules_tbi = tree_controller->mt_modules_to_be_installed
-                                                       it_modules_tbd = tree_controller->mt_modules_to_be_deleted
-                                                       i_salv_function = 'DEL_BGND'
-                                                       i_op = 'uninstall'
-                                                       i_tree_controller = tree_controller ) = abap_false.
+  METHOD get_target_version.
+    "  Return cached version if already determined
+    IF target_version IS NOT INITIAL.
+      r_version = target_version.
       RETURN.
     ENDIF.
-
-    IF lines( tree_controller->mt_modules_to_be_deleted ) > 0.
-
-      IF tree_controller->sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = lv_target_version ) = abap_false.
-        RETURN.
+    " we only use the same version as core (given it is installed at all)
+    " if the installed version of core is NOT the latest version
+    IF tree_controller->sdk_package_manager->is_core_installed( ) = abap_true.
+      IF NOT tree_controller->sdk_package_manager->is_version_latest( tree_controller->sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-cvers ).
+        target_version = tree_controller->sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-cvers.
+      ELSE.
+        target_version = 'LATEST'.
       ENDIF.
-
+    ELSE.
+      target_version = 'LATEST'.
     ENDIF.
+    r_version = target_version.
+  ENDMETHOD.
 
-    DATA(l_jobnumber) = tree_controller->sdk_package_manager->job_manager->submit_batch_job( i_modules_to_be_installed = tree_controller->mt_modules_to_be_installed " empty since modules tbi are not collected here
-                                                                                             i_modules_to_be_deleted   = tree_controller->mt_modules_to_be_deleted
-                                                                                             i_target_version          = lv_target_version ).
-
-    CONCATENATE `Submitted job with number ` l_jobnumber INTO DATA(l_job_message) ##NO_TEXT.
-    MESSAGE i000(0k) WITH l_job_message.
+  METHOD lif_ui_command~execute.
+    DATA(job_manager) = tree_controller->sdk_package_manager->job_manager.
+    DATA(job_number) = job_manager->submit_batch_job( i_modules_to_be_installed = tree_controller->mt_modules_to_be_installed " empty since modules tbi are not collected here
+                                                     i_modules_to_be_deleted   = tree_controller->mt_modules_to_be_deleted
+                                                     i_target_version          = get_target_version( ) ).
+    lcl_ui_utils=>display_job_submitted_message( i_job_number = job_number ).
     tree_controller->refresh( ).
-
   ENDMETHOD.
 
   METHOD lif_ui_command~can_execute.
-
+    CLEAR: tree_controller->mt_modules_to_be_installed.
+    CLEAR: tree_controller->mt_modules_to_be_deleted.
+    tree_controller->mt_modules_to_be_deleted = tree_controller->get_modules_to_be_deleted( i_target_version = get_target_version( ) ).
+    CHECK lcl_ui_selection_validator=>validate_selection( it_modules_tbi = tree_controller->mt_modules_to_be_installed
+                                                       it_modules_tbd = tree_controller->mt_modules_to_be_deleted
+                                                       i_salv_function = 'DEL_BGND'
+                                                       i_op = 'uninstall'
+                                                       i_tree_controller = tree_controller ).
+    CHECK lines( tree_controller->mt_modules_to_be_deleted ) > 0.
+    CHECK tree_controller->sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
+    r_result = abap_true.
   ENDMETHOD.
 ENDCLASS.
 
@@ -3677,12 +3740,9 @@ ENDCLASS.
 
 CLASS lcl_ui_command_ins_all IMPLEMENTATION.
   METHOD lif_ui_command~execute.
-    DATA: l_job_message TYPE string.
-    DATA: l_jobnumber TYPE btcjobcnt.
-    l_jobnumber = i_tree_controller->sdk_package_manager->install_all_modules( it_modules_to_be_installed = i_tree_controller->mt_modules_to_be_installed
+    data(job_number) = i_tree_controller->sdk_package_manager->install_all_modules( it_modules_to_be_installed = i_tree_controller->mt_modules_to_be_installed
                                                                                it_modules_to_be_deleted   = i_tree_controller->mt_modules_to_be_deleted ).
-    CONCATENATE `Submitted job with number ` l_jobnumber INTO l_job_message ##NO_TEXT.
-    MESSAGE i000(0k) WITH l_job_message.
+    lcl_ui_utils=>display_job_submitted_message( i_job_number = job_number ).
     i_tree_controller->refresh( ).
   ENDMETHOD.
 
@@ -3745,43 +3805,28 @@ CLASS lcl_ui_command_factory IMPLEMENTATION.
 
       WHEN 'BTCH' OR 'EXE_BGND'.
 
-
       WHEN 'INS_FGND'.
-
-
 
       WHEN 'INS_BGND'.
 
-
-
       WHEN 'DEL_FGND'.
-
-
-
+        r_command = NEW lcl_ui_command_del_dia( i_tree_controller = i_tree_controller ).
       WHEN 'DEL_BGND'.
         r_command = NEW lcl_ui_command_del_btc( i_tree_controller = i_tree_controller ).
-
       WHEN 'UPD_INST'.
         r_command = NEW lcl_ui_command_upd_ins( i_tree_controller = i_tree_controller ).
-
       WHEN 'DES_INST'.
         r_command = NEW lcl_ui_command_des_ins( i_tree_controller = i_tree_controller ).
-
       WHEN 'REF_TREE'.
         r_command = NEW lcl_ui_command_ref_ctl( i_tree_controller = i_tree_controller ).
-
       WHEN 'BTC_DTLS'.
         r_command = NEW lcl_ui_command_btc_dtl( i_tree_controller = i_tree_controller ).
-
       WHEN 'DOW_CERT'.
         r_command = NEW lcl_ui_command_dow_crt( i_tree_controller = i_tree_controller ).
-
       WHEN 'DOW_TRAK'.
         r_command = NEW lcl_ui_command_dow_trk( i_tree_controller = i_tree_controller ).
-
       WHEN 'INS_ALL'.
         r_command = NEW lcl_ui_command_ins_all( i_tree_controller =  i_tree_controller ).
-
       WHEN OTHERS.
 
     ENDCASE.
@@ -3797,8 +3842,8 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
   METHOD constructor.
 
-    IF ir_sdk_package_manager IS BOUND.
-      sdk_package_manager = ir_sdk_package_manager.
+    IF i_sdk_package_manager IS BOUND.
+      sdk_package_manager = i_sdk_package_manager.
     ELSE.
       sdk_package_manager = NEW lcl_sdk_package_manager( ).
     ENDIF.
@@ -5203,90 +5248,19 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
             refresh( ).
 
           WHEN 'DEL_FGND'.
-
-            " we only use the same version as core (given it is installed at all)
-            " if the installed version of core is NOT the latest version
-            IF sdk_package_manager->is_core_installed( ) = abap_true.
-              IF NOT sdk_package_manager->is_version_latest( sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-cvers ).
-                lv_target_version = sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-cvers.
-              ELSE.
-                lv_target_version = 'LATEST'.
-              ENDIF.
-            ELSE.
-              lv_target_version = 'LATEST'.
+            DATA(delete_dialog_command) = lcl_ui_command_factory=>create_command( i_function_code   = e_salv_function
+                                                                                  i_tree_controller = me ).
+            IF delete_dialog_command->can_execute( i_tree_controller = me ).
+              delete_dialog_command->execute( i_tree_controller = me ).
             ENDIF.
-
-
-            CLEAR: mt_modules_to_be_installed.
-            CLEAR: mt_modules_to_be_deleted.
-            mt_modules_to_be_deleted = get_modules_to_be_deleted( i_target_version = lv_target_version ).
-
-
-            IF lcl_ui_selection_validator=>validate_selection( it_modules_tbi = mt_modules_to_be_installed
-                                       it_modules_tbd = mt_modules_to_be_deleted
-                                       i_salv_function = e_salv_function
-                                       i_op = 'uninstall'
-                                       i_tree_controller = me ) = abap_false.
-              RETURN.
-            ENDIF.
-
-            IF lines( mt_modules_to_be_deleted ) > 0.
-
-              IF sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = lv_target_version ) = abap_false.
-                RETURN.
-              ENDIF.
-
-            ENDIF.
-
-            sdk_package_manager->run_foreground( i_modules_to_be_installed = mt_modules_to_be_installed " empty since modules tbi are not collected here
-                                                 i_modules_to_be_deleted   = mt_modules_to_be_deleted
-                                                 i_target_version          = lv_target_version ).
-            refresh( ).
 
           WHEN 'DEL_BGND'.
 
-            " we only use the same version as core (given it is installed at all)
-            " if the installed version of core is  NOT the latest version
-            IF sdk_package_manager->is_core_installed( ) = abap_true.
-              IF NOT sdk_package_manager->is_version_latest( sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-cvers ).
-                lv_target_version = sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-cvers.
-              ELSE.
-                lv_target_version = 'LATEST'.
-              ENDIF.
-            ELSE.
-              lv_target_version = 'LATEST'.
+            DATA(delete_batch_command) = lcl_ui_command_factory=>create_command( i_function_code   = e_salv_function
+                                                                                 i_tree_controller = me ).
+            IF delete_batch_command->can_execute( i_tree_controller = me ).
+              delete_batch_command->execute( i_tree_controller = me ).
             ENDIF.
-
-
-            CLEAR: mt_modules_to_be_installed.
-            CLEAR: mt_modules_to_be_deleted.
-            mt_modules_to_be_deleted = get_modules_to_be_deleted( i_target_version = lv_target_version ).
-
-
-            IF lcl_ui_selection_validator=>validate_selection( it_modules_tbi = mt_modules_to_be_installed
-                                                   it_modules_tbd = mt_modules_to_be_deleted
-                                                   i_salv_function = e_salv_function
-                                                   i_op = 'uninstall'
-                                                   i_tree_controller = me ) = abap_false.
-              RETURN.
-            ENDIF.
-
-            IF lines( mt_modules_to_be_deleted ) > 0.
-
-              IF sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = lv_target_version ) = abap_false.
-                RETURN.
-              ENDIF.
-
-            ENDIF.
-
-            l_jobnumber = sdk_package_manager->job_manager->submit_batch_job( i_modules_to_be_installed = mt_modules_to_be_installed " empty since modules tbi are not collected here
-                                                                              i_modules_to_be_deleted   = mt_modules_to_be_deleted
-                                                                              i_target_version          = lv_target_version ).
-
-            CONCATENATE `Submitted job with number ` l_jobnumber INTO l_job_message ##NO_TEXT.
-            MESSAGE i000(0k) WITH l_job_message.
-
-            refresh( ).
 
           WHEN 'UPD_INST'.
 
@@ -5625,7 +5599,7 @@ CLASS lcl_main IMPLEMENTATION.
       DATA(sdk_pm_batch) = NEW lcl_sdk_package_manager( i_batch_mode = sy-batch ).
     ELSE.
       DATA(sdk_pm) = NEW lcl_sdk_package_manager( ).
-      DATA(sdk_pm_tc) = NEW lcl_ui_tree_controller( ir_sdk_package_manager = sdk_pm ).
+      DATA(sdk_pm_tc) = NEW lcl_ui_tree_controller( i_sdk_package_manager = sdk_pm ).
     ENDIF.
   ENDMETHOD.
 ENDCLASS.
