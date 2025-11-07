@@ -2073,6 +2073,8 @@ CLASS lcl_sdk_package_manager DEFINITION FINAL.
       is_deprecated IMPORTING i_tla           TYPE lcl_sdk_module=>t_tla
                     RETURNING VALUE(r_result) TYPE abap_bool,
       is_core_installed RETURNING VALUE(r_result) TYPE abap_bool,
+      is_module_core IMPORTING i_tla           TYPE lcl_sdk_module=>t_tla
+                     RETURNING VALUE(r_result) TYPE abap_bool,
       is_version_latest IMPORTING i_version       TYPE string
                         RETURNING VALUE(r_result) TYPE abap_bool,
       get_sdk_installed_modules RETURNING VALUE(r_installed_modules) TYPE tt_sdk_module
@@ -2351,10 +2353,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
 
         DATA(l_truser) = 'AWS_' && <fs_installed_module>-tla.
 
-        IF <fs_installed_module>-tla = 'sts' OR
-            <fs_installed_module>-tla = 's3' OR
-            <fs_installed_module>-tla = 'smr' OR
-            <fs_installed_module>-tla = 'rla'.
+        IF is_module_core( <fs_installed_module>-tla ).
           l_truser = 'AWS_CORE'.
           IF lines( mt_available_modules_inst ) > 0.
             <fs_installed_module>-avers = me->mt_available_modules_inst[ tla = 'core' ]-avers.
@@ -2442,10 +2441,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
     ENDTRY.
 
     LOOP AT lt_installed_modules INTO DATA(wa_inst).
-      IF wa_inst-tla = 's3' OR
-         wa_inst-tla = 'rla' OR
-         wa_inst-tla = 'sts' OR
-         wa_inst-tla = 'smr'.
+      IF is_module_core( wa_inst-tla ).
         CONTINUE.
       ELSE.
         READ TABLE mt_available_modules_inst WITH KEY tla = wa_inst-tla TRANSPORTING NO FIELDS.
@@ -2620,6 +2616,12 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
     r_result = lv_result.
 
   ENDMETHOD.
+
+
+  METHOD is_module_core.
+    r_result = xsdbool( i_tla = 'sts' OR i_tla = 's3' OR i_tla = 'smr' OR i_tla = 'rla' ).
+  ENDMETHOD.
+
 
   METHOD is_version_latest.
 
@@ -3588,6 +3590,7 @@ CLASS lcl_ui_command_exe_dia IMPLEMENTATION.
     CHECK tree_controller->sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
     CHECK tree_controller->sdk_package_manager->update_zipfiles_if_outdated( i_avers_core_inst = tree_controller->sdk_package_manager->mt_available_modules_inst[ tla = 'core' ]-avers
                             i_avers_core_uninst = tree_controller->sdk_package_manager->mt_available_modules_uninst[ tla = 'core' ]-avers ).
+    r_result = abap_true.
   ENDMETHOD.
 
   METHOD get_target_version.
@@ -3595,7 +3598,6 @@ CLASS lcl_ui_command_exe_dia IMPLEMENTATION.
   ENDMETHOD.
 ENDCLASS.
 
-" TODO: let btc inherit from dia commands as can_execute is essentially the same for both right now
 CLASS lcl_ui_command_exe_btc DEFINITION INHERITING FROM lcl_ui_command_base FINAL.
   PUBLIC SECTION.
     METHODS:
@@ -3627,7 +3629,7 @@ CLASS lcl_ui_command_exe_btc IMPLEMENTATION.
     INSERT LINES OF tree_controller->mt_modules_to_be_updated INTO TABLE tree_controller->mt_modules_to_be_installed.
     CHECK lcl_ui_selection_validator=>validate_selection( it_modules_tbi = tree_controller->mt_modules_to_be_installed
                                it_modules_tbd = tree_controller->mt_modules_to_be_deleted
-                               i_salv_function = 'EXE_FGND'
+                               i_salv_function = 'EXE_BGND'
                                i_op = 'install'
                                i_tree_controller = i_tree_controller ).
     CHECK lines( tree_controller->mt_modules_to_be_installed ) > 0
@@ -3636,6 +3638,7 @@ CLASS lcl_ui_command_exe_btc IMPLEMENTATION.
     CHECK tree_controller->sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
     CHECK tree_controller->sdk_package_manager->update_zipfiles_if_outdated( i_avers_core_inst = tree_controller->sdk_package_manager->mt_available_modules_inst[ tla = 'core' ]-avers
                             i_avers_core_uninst = tree_controller->sdk_package_manager->mt_available_modules_uninst[ tla = 'core' ]-avers ).
+    r_result = abap_true.
   ENDMETHOD.
 
   METHOD get_target_version.
@@ -3697,7 +3700,7 @@ CLASS lcl_ui_command_ins_btc IMPLEMENTATION.
     tree_controller->mt_modules_to_be_installed = tree_controller->get_modules_to_be_installed( i_target_version = get_target_version( ) ).
     CHECK lcl_ui_selection_validator=>validate_selection( it_modules_tbi = tree_controller->mt_modules_to_be_installed
                                it_modules_tbd = tree_controller->mt_modules_to_be_deleted
-                               i_salv_function = 'INS_FGND'
+                               i_salv_function = 'INS_BGND'
                                i_op = 'install'
                                i_tree_controller = tree_controller ) = abap_false.
     CHECK lines( tree_controller->mt_modules_to_be_installed ) > 0.
@@ -4364,10 +4367,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
     LOOP AT sdk_package_manager->mt_installed_modules INTO wa_installed_module.
 
       " Skip modules that are part of AWS_CORE
-      IF wa_installed_module-tla = 'sts'
-          OR wa_installed_module-tla = 'smr'
-          OR wa_installed_module-tla = 's3'
-          OR wa_installed_module-tla = 'rla'.
+      IF sdk_package_manager->is_module_core( wa_installed_module-tla ).
 
         CONTINUE.
 
@@ -5063,10 +5063,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
             AND NOT <fs_node>-node->is_folder( )
             AND CAST string( <fs_node>-node->get_item( 'OP_CODE' )->get_value( ) )->* = lif_ui_constants=>c_operation_install.
 
-            IF <fs_node>-node->get_text( ) = 'sts' OR
-                <fs_node>-node->get_text( ) = 's3' OR
-                <fs_node>-node->get_text( ) = 'smr' OR
-                <fs_node>-node->get_text( ) = 'rla'.
+            IF sdk_package_manager->is_module_core( CONV #( <fs_node>-node->get_text( ) ) ).
 
               IF line_exists( rt_modules_to_be_installed[ 'core' ] ).
                 CONTINUE.
@@ -5109,10 +5106,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
           AND NOT <fs_node>-node->is_folder( )
           AND CAST string( <fs_node>-node->get_item( 'OP_CODE' )->get_value( ) )->* = lif_ui_constants=>c_operation_delete.
 
-            IF <fs_node>-node->get_text( ) = 'sts' OR
-                <fs_node>-node->get_text( ) = 's3' OR
-                <fs_node>-node->get_text( ) = 'smr' OR
-                <fs_node>-node->get_text( ) = 'rla'.
+            IF sdk_package_manager->is_module_core( CONV #( <fs_node>-node->get_text( ) ) ).
 
               IF line_exists( rt_modules_to_be_deleted[ 'core' ] ).
                 CONTINUE.
@@ -5158,10 +5152,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
             AND NOT <fs_node>-node->is_folder( )
             AND CAST string( <fs_node>-node->get_item( 'OP_CODE' )->get_value( ) )->* = lif_ui_constants=>c_operation_update.
 
-            IF <fs_node>-node->get_text( ) = 'sts' OR
-                <fs_node>-node->get_text( ) = 's3' OR
-                <fs_node>-node->get_text( ) = 'smr' OR
-                <fs_node>-node->get_text( ) = 'rla'.
+            IF sdk_package_manager->is_module_core( CONV #( <fs_node>-node->get_text( ) ) ).
               INSERT VALUE ts_sdk_tla( tla = 'core' version = i_target_version ) INTO TABLE rt_modules_to_be_updated.
             ELSE.
               INSERT VALUE ts_sdk_tla( tla = <fs_node>-node->get_text( ) version = i_target_version ) INTO TABLE rt_modules_to_be_updated.
@@ -5185,7 +5176,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
         ENDCASE.
         DATA(command) = lcl_ui_command_factory=>create_command( i_function_code   = e_salv_function
                                                                 i_tree_controller = me ).
-        IF command->can_execute( i_tree_controller = me ).
+        IF command->can_execute( i_tree_controller = me ) = abap_true.
           command->execute( i_tree_controller = me ).
         ENDIF.
       CATCH lcx_error INTO DATA(lo_ex).
