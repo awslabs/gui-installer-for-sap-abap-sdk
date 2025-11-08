@@ -5040,7 +5040,6 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD get_modules_to_be_installed.
-    DATA lr_selections TYPE REF TO cl_salv_selections_tree.
     DATA lr_nodes TYPE REF TO cl_salv_nodes.
     DATA lt_nodes TYPE salv_t_nodes.
 
@@ -5063,17 +5062,12 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
             AND NOT <fs_node>-node->is_folder( )
             AND CAST string( <fs_node>-node->get_item( 'OP_CODE' )->get_value( ) )->* = lif_ui_constants=>c_operation_install.
 
-            IF sdk_package_manager->is_module_core( CONV #( <fs_node>-node->get_text( ) ) ).
-
-              IF line_exists( rt_modules_to_be_installed[ 'core' ] ).
-                CONTINUE.
-              ELSE.
-                INSERT VALUE ts_sdk_tla( tla = 'core' version = i_target_version ) INTO TABLE rt_modules_to_be_installed.
-              ENDIF.
-
-            ELSE.
-              INSERT VALUE ts_sdk_tla( tla = <fs_node>-node->get_text( ) version = i_target_version ) INTO TABLE rt_modules_to_be_installed.
+            DATA(tla) = <fs_node>-node->get_text( ).
+            IF sdk_package_manager->is_module_core( CONV #( tla ) ).
+              tla = 'core'.
             ENDIF.
+            CHECK NOT line_exists( rt_modules_to_be_installed[  tla = tla ] ).
+            INSERT VALUE ts_sdk_tla( tla = tla version = i_target_version ) INTO TABLE rt_modules_to_be_installed.
           ENDIF.
 
         CATCH cx_salv_msg.
@@ -5084,7 +5078,6 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
 
   METHOD get_modules_to_be_deleted.
-    DATA lr_selections TYPE REF TO cl_salv_selections_tree.
     DATA lr_nodes TYPE REF TO cl_salv_nodes.
     DATA lt_nodes TYPE salv_t_nodes.
 
@@ -5106,17 +5099,12 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
           AND NOT <fs_node>-node->is_folder( )
           AND CAST string( <fs_node>-node->get_item( 'OP_CODE' )->get_value( ) )->* = lif_ui_constants=>c_operation_delete.
 
-            IF sdk_package_manager->is_module_core( CONV #( <fs_node>-node->get_text( ) ) ).
-
-              IF line_exists( rt_modules_to_be_deleted[ 'core' ] ).
-                CONTINUE.
-              ELSE.
-                INSERT VALUE ts_sdk_tla( tla = 'core' version = i_target_version ) INTO TABLE rt_modules_to_be_deleted.
-              ENDIF.
-
-            ELSE.
-              INSERT VALUE ts_sdk_tla( tla = <fs_node>-node->get_text( ) version = i_target_version ) INTO TABLE rt_modules_to_be_deleted.
+            DATA(tla) = <fs_node>-node->get_text( ).
+            IF sdk_package_manager->is_module_core( CONV #( tla ) ).
+              tla = 'core'.
             ENDIF.
+            CHECK NOT line_exists( rt_modules_to_be_deleted[ tla = tla ] ).
+            INSERT VALUE ts_sdk_tla( tla = tla version = i_target_version ) INTO TABLE rt_modules_to_be_deleted.
 
           ENDIF.
 
@@ -5129,7 +5117,6 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD get_modules_to_be_updated.
-    DATA lr_selections TYPE REF TO cl_salv_selections_tree.
     DATA lr_nodes TYPE REF TO cl_salv_nodes.
     DATA lt_nodes TYPE salv_t_nodes.
 
@@ -5152,11 +5139,11 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
             AND NOT <fs_node>-node->is_folder( )
             AND CAST string( <fs_node>-node->get_item( 'OP_CODE' )->get_value( ) )->* = lif_ui_constants=>c_operation_update.
 
-            IF sdk_package_manager->is_module_core( CONV #( <fs_node>-node->get_text( ) ) ).
-              INSERT VALUE ts_sdk_tla( tla = 'core' version = i_target_version ) INTO TABLE rt_modules_to_be_updated.
-            ELSE.
-              INSERT VALUE ts_sdk_tla( tla = <fs_node>-node->get_text( ) version = i_target_version ) INTO TABLE rt_modules_to_be_updated.
+            DATA(tla) = <fs_node>-node->get_text( ).
+            IF sdk_package_manager->is_module_core( CONV #( tla ) ).
+              tla = 'core'.
             ENDIF.
+            INSERT VALUE ts_sdk_tla( tla = tla version = i_target_version ) INTO TABLE rt_modules_to_be_updated.
           ENDIF.
 
         CATCH cx_salv_msg.
@@ -5176,7 +5163,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
         ENDCASE.
         DATA(command) = lcl_ui_command_factory=>create_command( i_function_code   = e_salv_function
                                                                 i_tree_controller = me ).
-        IF command->can_execute( i_tree_controller = me ) = abap_true.
+        IF command->can_execute( i_tree_controller = me ).
           command->execute( i_tree_controller = me ).
         ENDIF.
       CATCH lcx_error INTO DATA(lo_ex).
