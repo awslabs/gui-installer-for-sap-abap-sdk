@@ -32,7 +32,7 @@ jobs:
           REPORT_FILE="src/#awslabs#sdk_installer.prog.abap"
           
           # Extract current version (e.g., '1.0.0')
-          CURRENT=$(grep -oPE "gc_version\s+TYPE\s+string\s+VALUE\s+'\K[^']+" "$REPORT_FILE")
+          CURRENT=$(grep -oP "gc_version\s+TYPE\s+string\s+VALUE\s+'\K[^']+" "$REPORT_FILE")
           echo "Current version: $CURRENT"
           
           # Split version into parts
