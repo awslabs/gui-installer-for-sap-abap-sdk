@@ -92,10 +92,10 @@ jobs:
           
           # Create a simple text file with version info
           cat > src/version.txt << EOF
-VERSION=$VERSION
-COMMIT=$COMMIT_SHA
-DATE=$BUILD_DATE
-EOF
+          VERSION=$VERSION
+          COMMIT=$COMMIT_SHA
+          DATE=$BUILD_DATE
+          EOF
           
           echo "Created version.txt:"
           cat src/version.txt
