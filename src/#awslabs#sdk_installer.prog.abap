@@ -64,6 +64,7 @@ CLASS lcl_ui_command_dow_crt DEFINITION DEFERRED.
 CLASS lcl_ui_command_dow_trk DEFINITION DEFERRED.
 CLASS lcl_ui_command_ref_ctl DEFINITION DEFERRED.
 CLASS lcl_ui_command_btc_dtl DEFINITION DEFERRED.
+CLASS lcl_ui_command_chk_upd DEFINITION DEFERRED.
 CLASS lcl_ui_utils DEFINITION DEFERRED.
 
 CLASS lcx_error DEFINITION DEFERRED.
@@ -72,9 +73,9 @@ CLASS lcl_main DEFINITION DEFERRED.
 
 INTERFACE lif_global_constants.
   CONSTANTS:
-    gc_version TYPE string VALUE '1.1.1' ##NO_TEXT,
-    gc_commit  TYPE string VALUE '9e832d0' ##NO_TEXT,
-    gc_date    TYPE string VALUE '2025-11-09 14:57:38 UTC' ##NO_TEXT,
+    gc_version            TYPE string VALUE '1.1.1' ##NO_TEXT,
+    gc_commit             TYPE string VALUE '9e832d0' ##NO_TEXT,
+    gc_date               TYPE string VALUE '2025-11-09 14:57:38 UTC' ##NO_TEXT,
     gc_url_github_version TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/version.txt'  ##NO_TEXT,
     gc_url_github_raw     TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/%23awslabs%23sdk_installer.prog.abap'  ##NO_TEXT.
 ENDINTERFACE.
@@ -446,7 +447,10 @@ INTERFACE lif_sdk_report_update_manager.
   METHODS:
     is_update_available RETURNING VALUE(r_result) TYPE boolean
                         RAISING   lcx_error,
-    update_report RAISING lcx_error.
+    update_report RAISING lcx_error,
+    get_available_version RETURNING VALUE(r_available_version) TYPE string
+                          RAISING   lcx_error,
+    get_current_version RETURNING VALUE(r_available_version) TYPE string..
 
 ENDINTERFACE.
 
@@ -458,7 +462,7 @@ CLASS lcl_sdk_report_update_manager DEFINITION FINAL.
       lif_sdk_report_update_manager.
 
     METHODS:
-      constructor IMPORTING i_sdk_internet_manager TYPE REF TO lif_sdk_internet_manager OPTIONAL.
+      constructor IMPORTING i_internet_manager TYPE REF TO lif_sdk_internet_manager OPTIONAL.
 
   PRIVATE SECTION.
     DATA: internet_manager TYPE REF TO lif_sdk_internet_manager.
@@ -477,8 +481,8 @@ CLASS lcl_sdk_report_update_manager IMPLEMENTATION.
 
 
   METHOD constructor.
-    IF i_sdk_internet_manager IS BOUND.
-      internet_manager = i_sdk_internet_manager.
+    IF i_internet_manager IS BOUND.
+      internet_manager = i_internet_manager.
     ELSE.
       internet_manager = NEW lcl_sdk_internet_manager( ).
     ENDIF.
@@ -494,8 +498,9 @@ CLASS lcl_sdk_report_update_manager IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD lif_sdk_report_update_manager~is_update_available.
 
+
+  METHOD lif_sdk_report_update_manager~get_available_version.
     " retrieve current version from github
     TRY.
         DATA(github_version_xstring) = internet_manager->download( i_absolute_uri = lif_global_constants=>gc_url_github_version
@@ -516,12 +521,22 @@ CLASS lcl_sdk_report_update_manager IMPLEMENTATION.
         RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = ex->get_text( ).
     ENDTRY.
 
-    if github_version is initial.
-        raise exception type lcx_error exporting iv_msg = 'Could not retrieve latest version from GitHub'.
-    endif.
+    IF github_version IS INITIAL.
+      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = 'Could not retrieve latest version from GitHub'.
+    ENDIF.
 
-    r_result = xsdbool( lcl_sdk_utils=>cmp_version_string( i_string1 = github_version i_string2 = lif_global_constants=>gc_version ) = 1 ).
+    r_available_version = github_version.
+  ENDMETHOD.
 
+
+  METHOD lif_sdk_report_update_manager~get_current_version.
+    r_available_version = lif_global_constants=>gc_version.
+  ENDMETHOD.
+
+
+  METHOD lif_sdk_report_update_manager~is_update_available.
+    r_result = xsdbool( lcl_sdk_utils=>cmp_version_string( i_string1 = lif_sdk_report_update_manager~get_available_version( )
+                                                           i_string2 = lif_sdk_report_update_manager~get_current_version( ) ) = 1 ).
   ENDMETHOD.
 
 
@@ -1051,11 +1066,11 @@ CLASS lcl_sdk_transport_manager DEFINITION FINAL.
       lif_sdk_transport_manager.
 
     METHODS:
-      constructor IMPORTING i_file_manager TYPE REF TO lcl_sdk_file_manager OPTIONAL.
+      constructor IMPORTING i_file_manager TYPE REF TO lif_sdk_file_manager OPTIONAL.
 
   PRIVATE SECTION.
     DATA:
-       file_manager TYPE REF TO lcl_sdk_file_manager.
+       file_manager TYPE REF TO lif_sdk_file_manager.
 
 ENDCLASS.
 
@@ -1150,11 +1165,11 @@ CLASS lcl_sdk_transport_manager IMPLEMENTATION.
 
 
     TRY.
-        file_manager->lif_sdk_file_manager~open_for_output( lv_filepath_cofile ).
+        file_manager->open_for_output( lv_filepath_cofile ).
         TRANSFER i_cofile_blob TO lv_filepath_cofile.
         CLOSE DATASET lv_filepath_cofile.
 
-        file_manager->lif_sdk_file_manager~open_for_output( lv_filepath_datafile ).
+        file_manager->open_for_output( lv_filepath_datafile ).
         TRANSFER i_datafile_blob TO lv_filepath_datafile.
         CLOSE DATASET lv_filepath_datafile.
       CATCH cx_sy_file_authority INTO DATA(r_ex1).
@@ -1183,8 +1198,8 @@ CLASS lcl_sdk_transport_manager IMPLEMENTATION.
 
     l_cofile_zip_path = lif_sdk_constants=>c_transports_zip_path && i_tla && '/' && e_cofile_name.
 
-    e_cofile_blob = file_manager->lif_sdk_file_manager~get_file_from_zip( i_zipfile_absolute_path = i_zipfile_absolute_path
-                                                                          i_file_to_retrieve      = l_cofile_zip_path ).
+    e_cofile_blob = file_manager->get_file_from_zip( i_zipfile_absolute_path = i_zipfile_absolute_path
+                                                     i_file_to_retrieve      = l_cofile_zip_path ).
 
   ENDMETHOD.
 
@@ -1200,8 +1215,8 @@ CLASS lcl_sdk_transport_manager IMPLEMENTATION.
 
     l_datafile_zip_path = lif_sdk_constants=>c_transports_zip_path && i_tla && '/' && e_datafile_name.
 
-    e_datafile_blob = file_manager->lif_sdk_file_manager~get_file_from_zip( i_zipfile_absolute_path = i_zipfile_absolute_path
-                                                                            i_file_to_retrieve      = l_datafile_zip_path ).
+    e_datafile_blob = file_manager->get_file_from_zip( i_zipfile_absolute_path = i_zipfile_absolute_path
+                                                       i_file_to_retrieve      = l_datafile_zip_path ).
 
 
   ENDMETHOD.
@@ -2066,16 +2081,18 @@ CLASS lcl_sdk_package_manager DEFINITION FINAL.
     DATA: file_manager TYPE REF TO lif_sdk_file_manager  READ-ONLY.
     DATA: transport_manager TYPE REF TO lif_sdk_transport_manager  READ-ONLY.
     DATA: job_manager TYPE REF TO lif_sdk_job_manager  READ-ONLY.
+    DATA: report_update_manager TYPE REF TO lif_sdk_report_update_manager READ-ONLY.
 
 
     METHODS:
-      constructor IMPORTING i_batch_mode          TYPE syst-batch OPTIONAL
-                            i_internet_manager    TYPE REF TO lif_sdk_internet_manager OPTIONAL
-                            i_certificate_manager TYPE REF TO lif_sdk_certificate_manager OPTIONAL
-                            i_file_manager        TYPE REF TO lcl_sdk_file_manager OPTIONAL
-                            i_transport_manager   TYPE REF TO lif_sdk_transport_manager OPTIONAL
-                            i_job_manager         TYPE REF TO lif_sdk_job_manager OPTIONAL
-                            i_sdk_zipfiles        TYPE REF TO lcl_sdk_zipfile_collection OPTIONAL
+      constructor IMPORTING i_batch_mode           TYPE syst-batch OPTIONAL
+                            i_internet_manager     TYPE REF TO lif_sdk_internet_manager OPTIONAL
+                            i_certificate_manager  TYPE REF TO lif_sdk_certificate_manager OPTIONAL
+                            i_file_manager         TYPE REF TO lcl_sdk_file_manager OPTIONAL
+                            i_transport_manager    TYPE REF TO lif_sdk_transport_manager OPTIONAL
+                            i_job_manager          TYPE REF TO lif_sdk_job_manager OPTIONAL
+                            i_report_update_manger TYPE REF TO lif_sdk_report_update_manager OPTIONAL
+                            i_sdk_zipfiles         TYPE REF TO lcl_sdk_zipfile_collection OPTIONAL
                   RAISING   lcx_error,
       install_all_modules IMPORTING it_modules_to_be_installed TYPE tt_sdk_tla
                                     it_modules_to_be_deleted   TYPE tt_sdk_tla
@@ -2149,13 +2166,19 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
     IF i_transport_manager IS BOUND.
       transport_manager = i_transport_manager.
     ELSE.
-      transport_manager = NEW lcl_sdk_transport_manager( ).
+      transport_manager = NEW lcl_sdk_transport_manager( i_file_manager = file_manager ).
     ENDIF.
 
     IF i_job_manager IS BOUND.
       job_manager = i_job_manager.
     ELSE.
       job_manager = NEW lcl_sdk_job_manager( ).
+    ENDIF.
+
+    IF i_report_update_manger IS BOUND.
+      report_update_manager = i_report_update_manger.
+    ELSE.
+      report_update_manager = NEW lcl_sdk_report_update_manager( i_internet_manager = internet_manager ).
     ENDIF.
 
     IF i_sdk_zipfiles IS BOUND.
@@ -3886,6 +3909,73 @@ CLASS lcl_ui_command_ins_all IMPLEMENTATION.
 ENDCLASS.
 
 
+CLASS lcl_ui_command_chk_upd DEFINITION INHERITING FROM lcl_ui_command_base FINAL.
+  PUBLIC SECTION.
+    METHODS:
+      lif_ui_command~execute REDEFINITION,
+      lif_ui_command~can_execute REDEFINITION.
+ENDCLASS.
+
+CLASS lcl_ui_command_chk_upd IMPLEMENTATION.
+
+  METHOD lif_ui_command~execute.
+    DATA(update_available) = tree_controller->sdk_package_manager->report_update_manager->is_update_available( ).
+    DATA(available_version) = tree_controller->sdk_package_manager->report_update_manager->get_available_version( ).
+    DATA(current_version) = tree_controller->sdk_package_manager->report_update_manager->get_current_version( ).
+
+    IF update_available = abap_true.
+
+      DATA lv_text TYPE string.
+      lv_text = |An updated version of the report available!|
+                && |({ current_version } -> { available_version })|
+                && |Download now?| ##NO_TEXT.
+
+      DATA lv_answer TYPE c.
+
+      CALL FUNCTION 'POPUP_TO_CONFIRM'
+        EXPORTING
+          titlebar              = ' '
+          diagnose_object       = ' '
+          text_question         = lv_text
+          text_button_1         = |Yes|
+          icon_button_1         = ' '
+          text_button_2         = |Not now|
+          icon_button_2         = ' '
+          default_button        = '1'
+          display_cancel_button = ' '
+          userdefined_f1_help   = ' '
+          start_column          = 25
+          start_row             = 6
+          iv_quickinfo_button_1 = ' '
+          iv_quickinfo_button_2 = ' '
+        IMPORTING
+          answer                = lv_answer
+        EXCEPTIONS
+          text_not_found        = 1
+          OTHERS                = 2 ##NO_TEXT.
+      IF sy-subrc <> 0.
+        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
+      ENDIF.
+
+      IF lv_answer = 1.
+        tree_controller->sdk_package_manager->report_update_manager->update_report( ).
+      ELSE.
+        LEAVE PROGRAM.
+      ENDIF.
+
+    ELSE.
+      MESSAGE |You are on the latest version ({ available_version }!| TYPE 'S' ##NO_TEXT..
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD lif_ui_command~can_execute.
+    r_result = tree_controller->sdk_package_manager->internet_manager->has_internet_access( ).
+  ENDMETHOD.
+ENDCLASS.
+
+
+
 CLASS lcl_ui_command_dow_crt DEFINITION INHERITING FROM lcl_ui_command_base FINAL.
   PUBLIC SECTION.
     METHODS:
@@ -3955,6 +4045,8 @@ CLASS lcl_ui_command_factory IMPLEMENTATION.
         r_command = NEW lcl_ui_command_ref_ctl( i_tree_controller = i_tree_controller ).
       WHEN 'BTC_DTLS'.
         r_command = NEW lcl_ui_command_btc_dtl( i_tree_controller = i_tree_controller ).
+      WHEN 'CHK_UPDT'.
+        r_command = NEW lcl_ui_command_chk_upd( i_tree_controller = i_tree_controller ).
       WHEN 'DOW_CERT'.
         r_command = NEW lcl_ui_command_dow_crt( i_tree_controller = i_tree_controller ).
       WHEN 'DOW_TRAK'.
@@ -3962,7 +4054,7 @@ CLASS lcl_ui_command_factory IMPLEMENTATION.
       WHEN 'INS_ALL'.
         r_command = NEW lcl_ui_command_ins_all( i_tree_controller =  i_tree_controller ).
       WHEN OTHERS.
-
+        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Unkown function code { i_function_code }| ##NO_TEXT..
     ENDCASE.
 
   ENDMETHOD.
@@ -4803,6 +4895,8 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
                                          boolean = ' ' ).
           lr_functions->enable_function( name    = 'DES_INST'
                                          boolean = ' ' ).
+          lr_functions->enable_function( name    = 'CHK_UPDT'
+                                         boolean = ' ' ).
           lr_functions->enable_function( name    = 'DOW_CERT'
                                          boolean = ' ' ).
           lr_functions->enable_function( name    = 'DOW_TRAK'
@@ -4850,7 +4944,8 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
             lr_functions->enable_function( name    = 'DES_INST'
                                            boolean = ' ' ).
           ENDIF.
-
+          lr_functions->enable_function( name    = 'CHK_UPDT'
+                                         boolean = 'X' ).
           lr_functions->enable_function( name    = 'DOW_CERT'
                                          boolean = 'X' ).
           lr_functions->enable_function( name    = 'DOW_TRAK'
@@ -4973,6 +5068,13 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
           icon     = '@B2@'
           text     = 'Deselect installed modules'
           tooltip  = 'Mark all installed modules for deletion'
+          position = if_salv_c_function_position=>left_of_salv_functions ) ##NO_TEXT.
+
+        lr_functions->add_function(
+          name     = 'CHK_UPDT'
+          icon     = '@I2@'
+          text     = 'Check for report update'
+          tooltip  = 'Check if there is a new report version'
           position = if_salv_c_function_position=>left_of_salv_functions ) ##NO_TEXT.
 
         lr_functions->add_function(
