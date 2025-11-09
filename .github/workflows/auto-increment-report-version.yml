@@ -17,7 +17,7 @@ jobs:
       - name: Increment version in ABAP report
         id: version
         run: |
-          FILE="src/zabapsdk_version_control.prog.abap"
+          FILE="src/#awslabs#sdk_installer.prog.abap"
           
           # Check if gc_version exists (looking for it inside the interface)
           if ! grep -q "gc_version TYPE string VALUE" "$FILE"; then
@@ -88,6 +88,6 @@ jobs:
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add src/zabapsdk_version_control.prog.abap
+          git add "src/#awslabs#sdk_installer.prog.abap"
           git commit -m "Bump version to ${{ steps.version.outputs.version }} [auto-version]" || exit 0
           git push
