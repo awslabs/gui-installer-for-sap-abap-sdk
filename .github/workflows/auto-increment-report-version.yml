@@ -105,7 +105,7 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add "src/#awslabs#sdk_installer.prog.abap"
-          git add "version.txt"
+          git add "src/version.txt"
           
           # Use original commit message with [skip actions] tag
           ORIGINAL_MSG="${{ github.event.head_commit.message }}"
