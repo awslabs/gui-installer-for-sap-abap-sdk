@@ -91,21 +91,21 @@ jobs:
           BUILD_DATE=$(date +'%Y-%m-%d %H:%M:%S UTC')
           
           # Create a simple text file with version info
-          cat > src/version.txt << EOF
+          cat > version.txt << EOF
 Version=$VERSION
 Commit=$COMMIT_SHA
 Date=$BUILD_DATE
 EOF
           
           echo "Created version.txt:"
-          cat src/version.txt
+          cat version.txt
       
       - name: Commit updated version
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add "src/#awslabs#sdk_installer.prog.abap"
-          git add "src/version.txt"
+          git add "version.txt"
           
           # Use original commit message with [skip actions] tag
           ORIGINAL_MSG="${{ github.event.head_commit.message }}"
