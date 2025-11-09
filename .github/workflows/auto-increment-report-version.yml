@@ -6,7 +6,7 @@ on:
 jobs:
   increment-version:
     # Skip if commit was made by the bot (prevent infinite loop)
-    if: "!contains(github.event.head_commit.message, '[auto-version]')"
+    if: "!contains(github.event.head_commit.message, '[skip actions]')"
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -65,7 +65,7 @@ jobs:
           BUILD_DATE=$(date +'%Y-%m-%d %H:%M:%S UTC')
           COMMIT_SHA="${GITHUB_SHA:0:7}"
           
-          # Replace version (always present)
+          # Replace version
           sed -i "s/gc_version TYPE string VALUE '[^']*'/gc_version TYPE string VALUE '$NEW_VERSION'/" "$FILE"
           
           # Replace commit if it exists
@@ -84,10 +84,30 @@ jobs:
             echo "⚠️  gc_date not found, skipping"
           fi
       
+      - name: Create version info file
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          COMMIT_SHA="${GITHUB_SHA:0:7}"
+          BUILD_DATE=$(date +'%Y-%m-%d %H:%M:%S UTC')
+          
+          # Create a simple text file with version info
+          cat > src/version.txt << EOF
+Version=$VERSION
+Commit=$COMMIT_SHA
+Date=$BUILD_DATE
+EOF
+          
+          echo "Created version.txt:"
+          cat src/version.txt
+      
       - name: Commit updated version
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add "src/#awslabs#sdk_installer.prog.abap"
-          git commit -m "Bump version to ${{ steps.version.outputs.version }} [auto-version]" || exit 0
+          git add "src/version.txt"
+          
+          # Use original commit message with [skip actions] tag
+          ORIGINAL_MSG="${{ github.event.head_commit.message }}"
+          git commit -m "$ORIGINAL_MSG [skip actions]" || exit 0
           git push
