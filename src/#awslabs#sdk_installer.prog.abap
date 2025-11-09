@@ -72,9 +72,9 @@ CLASS lcl_main DEFINITION DEFERRED.
 
 INTERFACE lif_global_constants.
   CONSTANTS:
-    gc_version TYPE string VALUE '1.0.0',
-    gc_commit  TYPE string VALUE '',
-    gc_date    TYPE string VALUE ''.
+    gc_version TYPE string VALUE '1.1.0',
+    gc_commit  TYPE string VALUE '52f8595',
+    gc_date    TYPE string VALUE '2025-11-09 13:20:48 UTC'.
 ENDINTERFACE.
 
 
