@@ -13,22 +13,26 @@ jobs:
     
     steps:
       - uses: actions/checkout@v3
+
+      - name: Check version constant exists
+        id: check_gc_version_exists
+        run: |
+          REPORT_FILE="src/#awslabs#sdk_installer.prog.abap"
+          if ! grep -qE "gc_version\s+TYPE\s+string\s+VALUE" "$REPORT_FILE"; then
+            echo "gc_version_exists=false" >> $GITHUB_OUTPUT
+            echo "⚠️  No gc_version constant found"
+          else
+            echo "gc_version_exists=true" >> $GITHUB_OUTPUT
+          fi
       
       - name: Increment version in ABAP report
-        id: version
+        id: increment_version_report
+        if: steps.check_gc_version_exists.outputs.gc_version_exists == 'true'
         run: |
-          FILE="src/#awslabs#sdk_installer.prog.abap"
-          
-          # Check if gc_version exists (looking for it inside the interface)
-          if ! grep -q "gc_version TYPE string VALUE" "$FILE"; then
-            echo "⚠️  No gc_version constant found in $FILE"
-            echo "Please add gc_version to your lif_global_constants interface."
-            echo "Skipping version increment."
-            exit 0
-          fi
+          REPORT_FILE="src/#awslabs#sdk_installer.prog.abap"
           
           # Extract current version (e.g., '1.0.0')
-          CURRENT=$(grep -oP "gc_version TYPE string VALUE '\K[^']+" "$FILE")
+          CURRENT=$(grep -oPE "gc_version\s+TYPE\s+string\s+VALUE\s+'\K[^']+" "$REPORT_FILE")
           echo "Current version: $CURRENT"
           
           # Split version into parts
@@ -66,32 +70,37 @@ jobs:
           COMMIT_SHA="${GITHUB_SHA:0:7}"
           
           # Replace version
-          sed -i "s/gc_version TYPE string VALUE '[^']*'/gc_version TYPE string VALUE '$NEW_VERSION'/" "$FILE"
+          # Replace entire line containing gc_version
+          sed -i -E "s/^([[:space:]]*)gc_version[[:space:]]+TYPE[[:space:]]+string[[:space:]]+VALUE[[:space:]]+'[^']*'(.*)/\1gc_version TYPE string VALUE '$NEW_VERSION'\2/" "$REPORT_FILE"
           
           # Replace commit if it exists
-          if grep -q "gc_commit.*TYPE string VALUE" "$FILE"; then
-            sed -i "s/gc_commit  TYPE string VALUE '[^']*'/gc_commit  TYPE string VALUE '$COMMIT_SHA'/" "$FILE"
+          if grep -qE "gc_commit\s+TYPE\s+string\s+VALUE" "$REPORT_FILE"; then
+            sed -i -E "s/^([[:space:]]*)gc_commit[[:space:]]+TYPE[[:space:]]+string[[:space:]]+VALUE[[:space:]]+'[^']*'(.*)/\1gc_commit  TYPE string VALUE '$COMMIT_SHA'\2/" "$REPORT_FILE"
             echo "Updated gc_commit to $COMMIT_SHA"
           else
             echo "⚠️  gc_commit not found, skipping"
           fi
           
           # Replace date if it exists
-          if grep -q "gc_date.*TYPE string VALUE" "$FILE"; then
-            sed -i "s/gc_date    TYPE string VALUE '[^']*'/gc_date    TYPE string VALUE '$BUILD_DATE'/" "$FILE"
+          if grep -qE "gc_date\s+TYPE\s+string\s+VALUE\s+" "$REPORT_FILE"; then
+            sed -i -E "s/^([[:space:]]*)gc_date[[:space:]]+TYPE[[:space:]]+string[[:space:]]+VALUE[[:space:]]+'[^']*'(.*)/\1gc_date    TYPE string VALUE '$BUILD_DATE'\2/" "$REPORT_FILE"
             echo "Updated gc_date to $BUILD_DATE"
           else
             echo "⚠️  gc_date not found, skipping"
           fi
       
       - name: Create version info file
+        id: create_version_file
+        if: steps.check_gc_version_exists.outputs.gc_version_exists == 'true'
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
+          VERSION_FILE="src/version.txt"
+          
+          VERSION="${{ steps.increment_version_report.outputs.version }}"
           COMMIT_SHA="${GITHUB_SHA:0:7}"
           BUILD_DATE=$(date +'%Y-%m-%d %H:%M:%S UTC')
           
           # Create a simple text file with version info
-          cat > src/version.txt << EOF
+          cat > $VERSION_FILE << EOF
           VERSION=$VERSION
           COMMIT=$COMMIT_SHA
           DATE=$BUILD_DATE
@@ -101,11 +110,16 @@ jobs:
           cat src/version.txt
       
       - name: Commit updated version
+        id: commit_updated_version
+        if: steps.check_gc_version_exists.outputs.gc_version_exists == 'true'
         run: |
+          REPORT_FILE="src/#awslabs#sdk_installer.prog.abap"
+          VERSION_FILE="src/version.txt"
+          
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add "src/#awslabs#sdk_installer.prog.abap"
-          git add "src/version.txt"
+          git add $REPORT_FILE
+          git add $VERSION_FILE
           
           # Use original commit message with [skip actions] tag
           ORIGINAL_MSG="${{ github.event.head_commit.message }}"
