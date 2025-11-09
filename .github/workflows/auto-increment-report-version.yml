@@ -91,14 +91,14 @@ jobs:
           BUILD_DATE=$(date +'%Y-%m-%d %H:%M:%S UTC')
           
           # Create a simple text file with version info
-          cat > version.txt << EOF
-Version=$VERSION
-Commit=$COMMIT_SHA
-Date=$BUILD_DATE
+          cat > src/version.txt << EOF
+VERSION=$VERSION
+COMMIT=$COMMIT_SHA
+DATE=$BUILD_DATE
 EOF
           
           echo "Created version.txt:"
-          cat version.txt
+          cat src/version.txt
       
       - name: Commit updated version
         run: |
