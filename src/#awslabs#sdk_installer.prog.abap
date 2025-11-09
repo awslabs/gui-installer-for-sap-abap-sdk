@@ -24,6 +24,8 @@
 
 REPORT /awslabs/sdk_installer.
 
+INTERFACE lif_global_constants DEFERRED.
+
 INTERFACE lif_sdk_constants DEFERRED.
 INTERFACE lif_sdk_internet_manager DEFERRED.
 INTERFACE lif_sdk_report_update_manager DEFERRED.
@@ -66,6 +68,14 @@ CLASS lcl_ui_utils DEFINITION DEFERRED.
 
 CLASS lcx_error DEFINITION DEFERRED.
 CLASS lcl_main DEFINITION DEFERRED.
+
+
+INTERFACE lif_global_constants.
+  CONSTANTS:
+    gc_version TYPE string VALUE '1.0.0',
+    gc_commit  TYPE string VALUE '',
+    gc_date    TYPE string VALUE ''.
+ENDINTERFACE.
 
 
 INTERFACE lif_sdk_constants.
