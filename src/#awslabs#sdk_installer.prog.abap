@@ -72,9 +72,11 @@ CLASS lcl_main DEFINITION DEFERRED.
 
 INTERFACE lif_global_constants.
   CONSTANTS:
-    gc_version TYPE string VALUE '1.1.0',
-    gc_commit  TYPE string VALUE '52f8595',
-    gc_date    TYPE string VALUE '2025-11-09 13:20:48 UTC'.
+    gc_version            TYPE string VALUE '1.1.0' ##NO_TEXT,
+    gc_commit             TYPE string VALUE '52f8595' ##NO_TEXT,
+    gc_date               TYPE string VALUE '2025-11-09 13:20:48 UTC' ##NO_TEXT,
+    gc_url_github_version TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/version.txt'  ##NO_TEXT,
+    gc_url_github_raw     TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/%23awslabs%23sdk_installer.prog.abap'  ##NO_TEXT.
 ENDINTERFACE.
 
 
@@ -87,8 +89,7 @@ INTERFACE lif_sdk_constants.
     c_sdk_uninst_file_prefix  TYPE string VALUE 'uninstall-abapsdk-' ##NO_TEXT,
     c_sdk_index_json_zip_path TYPE string VALUE 'META-INF/sdk_index.json' ##NO_TEXT,
     c_transports_zip_path     TYPE string VALUE 'transports/' ##NO_TEXT,
-    c_url_internet_check      TYPE w3_url VALUE 'http://ocsp.r2m02.amazontrust.com' ##NO_TEXT,
-    c_url_github_raw          TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/%23awslabs%23sdk_installer.prog.abap'  ##NO_TEXT.
+    c_url_internet_check      TYPE w3_url VALUE 'http://ocsp.r2m02.amazontrust.com' ##NO_TEXT.
 ENDINTERFACE.
 
 INTERFACE lif_ui_constants.
@@ -461,13 +462,13 @@ CLASS lcl_sdk_report_update_manager DEFINITION FINAL.
 
   PRIVATE SECTION.
     DATA: internet_manager TYPE REF TO lif_sdk_internet_manager.
-    DATA: report_github_cached TYPE xstring.
 
     METHODS:
       download_report IMPORTING i_url_github_raw        TYPE w3_url
                       RETURNING VALUE(r_report_xstring) TYPE xstring
                       RAISING   lcx_error,
-      write_report_update RAISING   lcx_error.
+      write_report_update IMPORTING i_report TYPE xstring
+                          RAISING   lcx_error.
 
 ENDCLASS.
 
@@ -484,37 +485,42 @@ CLASS lcl_sdk_report_update_manager IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD lif_sdk_report_update_manager~update_report.
-    IF report_github_cached IS NOT INITIAL.
-      write_report_update( ).
-    ELSE.
-      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Check for update first!| ##NO_TEXT..
-    ENDIF.
+    TRY.
+        DATA(report) = download_report( i_url_github_raw = lif_global_constants=>gc_url_github_raw ).
+        write_report_update( i_report = report ).
+      CATCH lcx_error INTO DATA(ex).
+        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = ex->get_text( ).
+    ENDTRY.
   ENDMETHOD.
 
 
   METHOD lif_sdk_report_update_manager~is_update_available.
 
-    DATA: report_local TYPE xstring.
-    DATA: report_local_stringtab TYPE TABLE OF string.
-    DATA: report_local_string TYPE string.
-
-    " retrieve current version from github, store it in private instance variable
+    " retrieve current version from github
     TRY.
-        report_github_cached = download_report( i_url_github_raw = lif_sdk_constants=>c_url_github_raw ).
-      CATCH lcx_error INTO DATA(ex1).
-        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = ex1->get_text( ).
+        DATA(github_version_xstring) = internet_manager->download( i_absolute_uri = lif_global_constants=>gc_url_github_version
+                                                                   i_blankstocrlf = abap_false ).
+        DATA(github_version_string) = cl_abap_conv_codepage=>create_in( )->convert( github_version_xstring ).
+
+        SPLIT github_version_string AT cl_abap_char_utilities=>newline INTO TABLE DATA(version_lines).
+
+        LOOP AT version_lines INTO DATA(version_line).
+          SPLIT version_line AT '=' INTO DATA(key) DATA(value).
+          CASE key.
+            WHEN 'VERSION'. DATA(github_version) = condense( value ).
+            WHEN 'COMMIT'. DATA(github_commit) = condense( value ).
+            WHEN 'DATE'. DATA(github_date) = condense( value ).
+          ENDCASE.
+        ENDLOOP.
+      CATCH lcx_error INTO DATA(ex).
+        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = ex->get_text( ).
     ENDTRY.
 
-    " read local report version as xstring
-    TRY.
-        READ REPORT sy-repid INTO report_local_stringtab.
-        CONCATENATE LINES OF report_local_stringtab INTO report_local_string SEPARATED BY cl_abap_char_utilities=>newline.
-        report_local = cl_abap_conv_codepage=>create_out( )->convert( source = report_local_string ).
-      CATCH cx_root INTO DATA(ex2).
-        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = ex2->get_text( ).
-    ENDTRY.
+    if github_version is initial.
+        raise exception type lcx_error exporting iv_msg = 'Could not retrieve latest version from GitHub'.
+    endif.
 
-    r_result = xsdbool( report_local <> report_github_cached ).
+    r_result = xsdbool( lcl_sdk_utils=>cmp_version_string( i_string1 = github_version i_string2 = lif_global_constants=>gc_version ) = 1 ).
 
   ENDMETHOD.
 
@@ -531,13 +537,8 @@ CLASS lcl_sdk_report_update_manager IMPLEMENTATION.
 
   METHOD write_report_update.
 
-    " Safety check, if the cached version is still initial, do not overwrite
-    IF report_github_cached IS INITIAL.
-      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Report content is empty!| ##NO_TEXT..
-    ENDIF.
-
     TRY.
-        DATA(report_string) = cl_abap_conv_codepage=>create_in( )->convert( source = report_github_cached ).
+        DATA(report_string) = cl_abap_conv_codepage=>create_in( )->convert( source = i_report ).
       CATCH cx_root INTO DATA(ex).
         RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = ex->get_text( ).
     ENDTRY.
