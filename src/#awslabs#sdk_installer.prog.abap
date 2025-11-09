@@ -75,7 +75,7 @@ INTERFACE lif_global_constants.
     gc_version            TYPE string VALUE '1.1.0' ##NO_TEXT,
     gc_commit             TYPE string VALUE '52f8595' ##NO_TEXT,
     gc_date               TYPE string VALUE '2025-11-09 13:20:48 UTC' ##NO_TEXT,
-    gc_url_github_version TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/version.txt'  ##NO_TEXT,
+    gc_url_github_version TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/version.txt'  ##NO_TEXT,
     gc_url_github_raw     TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/%23awslabs%23sdk_installer.prog.abap'  ##NO_TEXT.
 ENDINTERFACE.
 
