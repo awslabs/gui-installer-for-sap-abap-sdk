@@ -73,9 +73,9 @@ CLASS lcl_main DEFINITION DEFERRED.
 
 INTERFACE lif_global_constants.
   CONSTANTS:
-    gc_version TYPE string VALUE '1.1.2' ##NO_TEXT,
-    gc_commit  TYPE string VALUE 'c1be915' ##NO_TEXT,
-    gc_date    TYPE string VALUE '2025-11-09 16:13:03 UTC' ##NO_TEXT,
+    gc_version            TYPE string VALUE '1.1.2' ##NO_TEXT,
+    gc_commit             TYPE string VALUE 'c1be915' ##NO_TEXT,
+    gc_date               TYPE string VALUE '2025-11-09 16:13:03 UTC' ##NO_TEXT,
     gc_url_github_version TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/version.txt'  ##NO_TEXT,
     gc_url_github_raw     TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/%23awslabs%23sdk_installer.prog.abap'  ##NO_TEXT.
 ENDINTERFACE.
@@ -146,6 +146,7 @@ CLASS lcx_error DEFINITION INHERITING FROM cx_static_check.
         iv_dsp   TYPE syst_msgty DEFAULT 'E'
         previous TYPE REF TO cx_root OPTIONAL.
     METHODS show.
+    methods get_text REDEFINITION.
 ENDCLASS.
 
 
@@ -156,6 +157,10 @@ CLASS lcx_error IMPLEMENTATION.
     av_typ = iv_typ.
     av_dsp = iv_dsp.
   ENDMETHOD.
+
+  method get_text.
+    result = av_msg.
+  endmethod.
 
   METHOD show.
     MESSAGE av_msg TYPE av_typ DISPLAY LIKE av_dsp.
@@ -383,8 +388,8 @@ CLASS lcl_sdk_internet_manager IMPLEMENTATION.
       ENDCASE.
       RAISE EXCEPTION TYPE lcx_error
         EXPORTING
-          iv_msg = |Could not establish a connection to { i_absolute_uri }:| &&
-                   msg && |Please check the SMICM trace for more details.| ##NO_TEXT.
+          iv_msg = |Could not establish a connection to { i_absolute_uri }: | &&
+                   msg && |. Please check the SMICM trace for more details.| ##NO_TEXT.
     ENDIF.
 
 
@@ -561,9 +566,19 @@ CLASS lcl_sdk_report_update_manager IMPLEMENTATION.
     SPLIT report_string AT cl_abap_char_utilities=>newline INTO TABLE DATA(report_stringtab).
 
     INSERT REPORT sy-repid FROM report_stringtab.
-
     IF sy-subrc <> 0.
       RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Failed to write report update!| ##NO_TEXT..
+    ENDIF.
+
+    CALL FUNCTION 'RS_WORKING_OBJECT_ACTIVATE'
+      EXPORTING
+        obj_name        = sy-repid
+        object          = 'REPS'
+        suppress_dialog = abap_true
+      EXCEPTIONS
+        OTHERS          = 1.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Failed to activate report update!| ##NO_TEXT..
     ENDIF.
 
 
@@ -3959,12 +3974,11 @@ CLASS lcl_ui_command_chk_upd IMPLEMENTATION.
 
       IF lv_answer = 1.
         tree_controller->sdk_package_manager->report_update_manager->update_report( ).
-      ELSE.
-        LEAVE PROGRAM.
+        MESSAGE |Report updated successfully. Please restart the report for changes to take effect!| TYPE 'I'.
       ENDIF.
 
     ELSE.
-      MESSAGE |You are on the latest version ({ available_version }!| TYPE 'S' ##NO_TEXT..
+      MESSAGE |You are on the latest version ({ available_version })!| TYPE 'S' ##NO_TEXT..
     ENDIF.
 
   ENDMETHOD.
