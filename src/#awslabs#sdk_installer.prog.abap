@@ -73,9 +73,9 @@ CLASS lcl_main DEFINITION DEFERRED.
 
 INTERFACE lif_global_constants.
   CONSTANTS:
-    gc_version TYPE string VALUE '1.1.4' ##NO_TEXT,
-    gc_commit  TYPE string VALUE '20d3d01' ##NO_TEXT,
-    gc_date    TYPE string VALUE '2025-11-10 22:23:20 UTC' ##NO_TEXT,
+    gc_version            TYPE string VALUE '1.1.3' ##NO_TEXT,
+    gc_commit             TYPE string VALUE '67b0b1b' ##NO_TEXT,
+    gc_date               TYPE string VALUE '2025-11-09 17:48:04 UTC' ##NO_TEXT,
     gc_url_github_version TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/version.txt'  ##NO_TEXT,
     gc_url_github_raw     TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/%23awslabs%23sdk_installer.prog.abap'  ##NO_TEXT.
 ENDINTERFACE.
@@ -574,15 +574,20 @@ CLASS lcl_sdk_report_update_manager IMPLEMENTATION.
     DATA: object TYPE e071-object VALUE 'REPS'.
 
     CALL FUNCTION 'RS_WORKING_OBJECT_ACTIVATE'
-      EXPORTING
-        obj_name        = obj_name
-        object          = object
-        suppress_dialog = abap_true
-      EXCEPTIONS
-        OTHERS          = 1.
+     EXPORTING
+       OBJECT                           = object
+       OBJ_NAME                         = obj_name
+     EXCEPTIONS
+       OBJECT_NOT_IN_WORKING_AREA       = 1
+       EXECUTION_ERROR                  = 2
+       CANCELLED                        = 3
+       INSERT_INTO_CORR_ERROR           = 4
+       OTHERS                           = 5
+              .
     IF sy-subrc <> 0.
       RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Failed to activate report update!| ##NO_TEXT..
     ENDIF.
+
 
 
   ENDMETHOD.
@@ -3944,8 +3949,7 @@ CLASS lcl_ui_command_chk_upd IMPLEMENTATION.
     IF update_available = abap_true.
 
       DATA lv_text TYPE string.
-      lv_text = |An updated version of the report available ({ current_version } -> { available_version })!|
-                && |Download now?| ##NO_TEXT.
+      lv_text = |An updated version of the report is available! Download now?| ##NO_TEXT.
 
       DATA lv_answer TYPE c.
 
