@@ -73,9 +73,9 @@ CLASS lcl_main DEFINITION DEFERRED.
 
 INTERFACE lif_global_constants.
   CONSTANTS:
-    gc_version TYPE string VALUE '1.1.5' ##NO_TEXT,
-    gc_commit  TYPE string VALUE '8ee80b8' ##NO_TEXT,
-    gc_date    TYPE string VALUE '2025-11-10 22:37:33 UTC' ##NO_TEXT,
+    gc_version TYPE string VALUE '1.1.6' ##NO_TEXT,
+    gc_commit  TYPE string VALUE 'e5bf02b' ##NO_TEXT,
+    gc_date    TYPE string VALUE '2025-11-10 22:48:49 UTC' ##NO_TEXT,
     gc_url_github_version TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/version.txt'  ##NO_TEXT,
     gc_url_github_raw     TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/%23awslabs%23sdk_installer.prog.abap'  ##NO_TEXT.
 ENDINTERFACE.
