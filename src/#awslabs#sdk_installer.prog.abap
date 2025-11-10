@@ -574,15 +574,20 @@ CLASS lcl_sdk_report_update_manager IMPLEMENTATION.
     DATA: object TYPE e071-object VALUE 'REPS'.
 
     CALL FUNCTION 'RS_WORKING_OBJECT_ACTIVATE'
-      EXPORTING
-        obj_name        = obj_name
-        object          = object
-        suppress_dialog = abap_true
-      EXCEPTIONS
-        OTHERS          = 1.
+     EXPORTING
+       OBJECT                           = object
+       OBJ_NAME                         = obj_name
+     EXCEPTIONS
+       OBJECT_NOT_IN_WORKING_AREA       = 1
+       EXECUTION_ERROR                  = 2
+       CANCELLED                        = 3
+       INSERT_INTO_CORR_ERROR           = 4
+       OTHERS                           = 5
+              .
     IF sy-subrc <> 0.
       RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Failed to activate report update!| ##NO_TEXT..
     ENDIF.
+
 
 
   ENDMETHOD.
@@ -3944,8 +3949,7 @@ CLASS lcl_ui_command_chk_upd IMPLEMENTATION.
     IF update_available = abap_true.
 
       DATA lv_text TYPE string.
-      lv_text = |An updated version of the report available ({ current_version } -> { available_version })!|
-                && |Download now?| ##NO_TEXT.
+      lv_text = |An updated version of the report is available! Download now?| ##NO_TEXT.
 
       DATA lv_answer TYPE c.
 
