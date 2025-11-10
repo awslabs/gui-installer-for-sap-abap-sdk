@@ -73,9 +73,9 @@ CLASS lcl_main DEFINITION DEFERRED.
 
 INTERFACE lif_global_constants.
   CONSTANTS:
-    gc_version TYPE string VALUE '1.1.3' ##NO_TEXT,
-    gc_commit  TYPE string VALUE '67b0b1b' ##NO_TEXT,
-    gc_date    TYPE string VALUE '2025-11-09 17:48:04 UTC' ##NO_TEXT,
+    gc_version            TYPE string VALUE '1.1.3' ##NO_TEXT,
+    gc_commit             TYPE string VALUE '67b0b1b' ##NO_TEXT,
+    gc_date               TYPE string VALUE '2025-11-09 17:48:04 UTC' ##NO_TEXT,
     gc_url_github_version TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/version.txt'  ##NO_TEXT,
     gc_url_github_raw     TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/%23awslabs%23sdk_installer.prog.abap'  ##NO_TEXT.
 ENDINTERFACE.
@@ -146,7 +146,7 @@ CLASS lcx_error DEFINITION INHERITING FROM cx_static_check.
         iv_dsp   TYPE syst_msgty DEFAULT 'E'
         previous TYPE REF TO cx_root OPTIONAL.
     METHODS show.
-    methods get_text REDEFINITION.
+    METHODS get_text REDEFINITION.
 ENDCLASS.
 
 
@@ -158,9 +158,9 @@ CLASS lcx_error IMPLEMENTATION.
     av_dsp = iv_dsp.
   ENDMETHOD.
 
-  method get_text.
+  METHOD get_text.
     result = av_msg.
-  endmethod.
+  ENDMETHOD.
 
   METHOD show.
     MESSAGE av_msg TYPE av_typ DISPLAY LIKE av_dsp.
@@ -570,10 +570,13 @@ CLASS lcl_sdk_report_update_manager IMPLEMENTATION.
       RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Failed to write report update!| ##NO_TEXT..
     ENDIF.
 
+    DATA: obj_name TYPE e071-obj_name VALUE sy-repid.
+    DATA: object TYPE e071-object VALUE 'REPS'.
+
     CALL FUNCTION 'RS_WORKING_OBJECT_ACTIVATE'
       EXPORTING
-        obj_name        = sy-repid
-        object          = 'REPS'
+        obj_name        = obj_name
+        object          = object
         suppress_dialog = abap_true
       EXCEPTIONS
         OTHERS          = 1.
@@ -5158,7 +5161,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
   METHOD create_container.
 
-    data(title) = |ABAP SDK Package Manager (v{ lif_global_constants=>gc_version })| ##NO_TEXT.
+    DATA(title) = |ABAP SDK Package Manager (v{ lif_global_constants=>gc_version })| ##NO_TEXT.
 
     CALL FUNCTION 'SALV_CSQT_CREATE_CONTAINER'
       EXPORTING
