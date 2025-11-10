@@ -3941,8 +3941,7 @@ CLASS lcl_ui_command_chk_upd IMPLEMENTATION.
     IF update_available = abap_true.
 
       DATA lv_text TYPE string.
-      lv_text = |An updated version of the report available!|
-                && |({ current_version } -> { available_version })|
+      lv_text = |An updated version of the report available ({ current_version } -> { available_version })!|
                 && |Download now?| ##NO_TEXT.
 
       DATA lv_answer TYPE c.
@@ -3974,11 +3973,11 @@ CLASS lcl_ui_command_chk_upd IMPLEMENTATION.
 
       IF lv_answer = 1.
         tree_controller->sdk_package_manager->report_update_manager->update_report( ).
-        MESSAGE |Report updated successfully. Please restart the report for changes to take effect!| TYPE 'I'.
+        MESSAGE |Report updated successfully. Please restart the report for changes to take effect! If you are starting the report from SE80 or SE38, please restart the transaction as well!| TYPE 'I'.
       ENDIF.
 
     ELSE.
-      MESSAGE |You are on the latest version ({ available_version })!| TYPE 'S' ##NO_TEXT..
+      MESSAGE |You are on the latest version!| TYPE 'S' ##NO_TEXT..
     ENDIF.
 
   ENDMETHOD.
@@ -5159,10 +5158,12 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
   METHOD create_container.
 
+    data(title) = |ABAP SDK Package Manager (v{ lif_global_constants=>gc_version })| ##NO_TEXT.
+
     CALL FUNCTION 'SALV_CSQT_CREATE_CONTAINER'
       EXPORTING
         r_content_manager = me
-        title             = 'ABAP SDK Package Manager' ##NO_TEXT.
+        title             = title.
 
   ENDMETHOD.
 
