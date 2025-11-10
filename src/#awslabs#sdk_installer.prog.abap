@@ -73,9 +73,9 @@ CLASS lcl_main DEFINITION DEFERRED.
 
 INTERFACE lif_global_constants.
   CONSTANTS:
-    gc_version TYPE string VALUE '1.1.5' ##NO_TEXT,
-    gc_commit  TYPE string VALUE '8ee80b8' ##NO_TEXT,
-    gc_date    TYPE string VALUE '2025-11-10 22:37:33 UTC' ##NO_TEXT,
+    gc_version TYPE string VALUE '1.1.6' ##NO_TEXT,
+    gc_commit  TYPE string VALUE 'e5bf02b' ##NO_TEXT,
+    gc_date    TYPE string VALUE '2025-11-10 22:48:49 UTC' ##NO_TEXT,
     gc_url_github_version TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/version.txt'  ##NO_TEXT,
     gc_url_github_raw     TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/%23awslabs%23sdk_installer.prog.abap'  ##NO_TEXT.
 ENDINTERFACE.
@@ -3949,7 +3949,7 @@ CLASS lcl_ui_command_chk_upd IMPLEMENTATION.
     IF update_available = abap_true.
 
       DATA lv_text TYPE string.
-      lv_text = |An updated version of the report is available! Download now?| ##NO_TEXT.
+      lv_text = |An updated version of the report is available!| ##NO_TEXT.
 
       DATA lv_answer TYPE c.
 
@@ -3958,9 +3958,9 @@ CLASS lcl_ui_command_chk_upd IMPLEMENTATION.
           titlebar              = ' '
           diagnose_object       = ' '
           text_question         = lv_text
-          text_button_1         = |Yes|
+          text_button_1         = |Download now|
           icon_button_1         = ' '
-          text_button_2         = |Not now|
+          text_button_2         = |Not yet|
           icon_button_2         = ' '
           default_button        = '1'
           display_cancel_button = ' '
