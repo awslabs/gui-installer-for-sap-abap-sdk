@@ -73,9 +73,9 @@ CLASS lcl_main DEFINITION DEFERRED.
 
 INTERFACE lif_global_constants.
   CONSTANTS:
-    gc_version TYPE string VALUE '1.1.7' ##NO_TEXT,
-    gc_commit  TYPE string VALUE '54a3219' ##NO_TEXT,
-    gc_date    TYPE string VALUE '2025-11-11 19:27:44 UTC' ##NO_TEXT,
+    gc_version            TYPE string VALUE '1.1.6' ##NO_TEXT,
+    gc_commit             TYPE string VALUE 'e5bf02b' ##NO_TEXT,
+    gc_date               TYPE string VALUE '2025-11-10 22:48:49 UTC' ##NO_TEXT,
     gc_url_github_version TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/version.txt'  ##NO_TEXT,
     gc_url_github_raw     TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/%23awslabs%23sdk_installer.prog.abap'  ##NO_TEXT.
 ENDINTERFACE.
@@ -627,10 +627,10 @@ CLASS lcl_sdk_certificate_manager DEFINITION FINAL.
 
   PRIVATE SECTION.
 
-    CONSTANTS: pse_context  TYPE ssf_s_strust_identity-pse_context VALUE 'SSLC' ##NO_TEXT,
-               pse_applic   TYPE ssf_s_strust_identity-pse_applic VALUE 'DFAULT' ##NO_TEXT,
-               pse_descript TYPE ssf_s_strust_identity-pse_descript VALUE 'SSL Client (Standard)' ##NO_TEXT,
-               pse_sprsl    TYPE ssf_s_strust_identity-sprsl VALUE 'E' ##NO_TEXT.
+    CONSTANTS: c_pse_context  TYPE ssf_s_strust_identity-pse_context VALUE 'SSLC' ##NO_TEXT,
+               c_pse_applic   TYPE ssf_s_strust_identity-pse_applic VALUE 'DFAULT' ##NO_TEXT,
+               c_pse_descript TYPE ssf_s_strust_identity-pse_descript VALUE 'SSL Client (Standard)' ##NO_TEXT,
+               c_pse_sprsl    TYPE ssf_s_strust_identity-sprsl VALUE 'E' ##NO_TEXT.
 
     DATA: internet_manager TYPE REF TO lif_sdk_internet_manager.
     DATA: amazon_root_certs TYPE lif_sdk_certificate_manager~tt_certificate. "populated in init_amazon_root_certs
@@ -670,7 +670,7 @@ CLASS lcl_sdk_certificate_manager IMPLEMENTATION.
 
     set_cert_status( CHANGING ct_certificates = github_root_certs ).
 
-    retrieve_missing_certificates( ).
+    retrieve_missing_certificates( ).   "TODO: Needs to go to ui tree
 
   ENDMETHOD.
 
@@ -736,10 +736,10 @@ CLASS lcl_sdk_certificate_manager IMPLEMENTATION.
     DATA lt_bapiret2 TYPE STANDARD TABLE OF bapiret2.
 
 
-    ls_strust_identity-pse_context = pse_context.
-    ls_strust_identity-pse_applic = pse_applic.
-    ls_strust_identity-pse_descript = pse_descript ##NO_TEXT.
-    ls_strust_identity-sprsl = pse_sprsl.
+    ls_strust_identity-pse_context = c_pse_context.
+    ls_strust_identity-pse_applic = c_pse_applic.
+    ls_strust_identity-pse_descript = c_pse_descript ##NO_TEXT.
+    ls_strust_identity-sprsl = c_pse_sprsl.
 
 
     CALL FUNCTION 'SSFR_GET_CERTIFICATELIST'
@@ -799,10 +799,10 @@ CLASS lcl_sdk_certificate_manager IMPLEMENTATION.
     DATA wa_amazon_root_cert TYPE lif_sdk_certificate_manager~ts_certificate.
     DATA lt_bapiret2 TYPE STANDARD TABLE OF bapiret2.
 
-    ls_strust_identity-pse_context = pse_context.
-    ls_strust_identity-pse_applic = pse_applic.
-    ls_strust_identity-pse_descript = pse_descript ##NO_TEXT.
-    ls_strust_identity-sprsl = pse_sprsl.
+    ls_strust_identity-pse_context = c_pse_context.
+    ls_strust_identity-pse_applic = c_pse_applic.
+    ls_strust_identity-pse_descript = c_pse_descript ##NO_TEXT.
+    ls_strust_identity-sprsl = c_pse_sprsl.
 
     CALL FUNCTION 'SSFR_GET_CERTIFICATELIST'
       EXPORTING
@@ -921,10 +921,10 @@ CLASS lcl_sdk_certificate_manager IMPLEMENTATION.
     DATA l_abap_regex_pcre TYPE REF TO cl_abap_regex.
 
 
-    ls_strust_identity-pse_context = pse_context .
-    ls_strust_identity-pse_applic = pse_applic.
-    ls_strust_identity-pse_descript = pse_descript.
-    ls_strust_identity-sprsl = pse_sprsl.
+    ls_strust_identity-pse_context = c_pse_context .
+    ls_strust_identity-pse_applic = c_pse_applic.
+    ls_strust_identity-pse_descript = c_pse_descript.
+    ls_strust_identity-sprsl = c_pse_sprsl.
 
     " root cert URLS set in set_amazon_root_cert_values
     LOOP AT amazon_root_certs INTO wa_amazon_root_cert FROM 1 TO 4.
