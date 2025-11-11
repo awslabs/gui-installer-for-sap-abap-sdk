@@ -1,7 +1,7 @@
 name: Auto-Increment ABAP Version
 on:
   push:
-    branches: [main]
+    branches: [develop]
 
 jobs:
   increment-version:
