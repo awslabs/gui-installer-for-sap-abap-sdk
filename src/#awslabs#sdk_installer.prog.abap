@@ -73,9 +73,9 @@ CLASS lcl_main DEFINITION DEFERRED.
 
 INTERFACE lif_global_constants.
   CONSTANTS:
-    gc_version TYPE string VALUE '1.1.7' ##NO_TEXT,
-    gc_commit  TYPE string VALUE 'c0d0656' ##NO_TEXT,
-    gc_date    TYPE string VALUE '2025-11-11 19:32:08 UTC' ##NO_TEXT,
+    gc_version            TYPE string VALUE '1.1.7' ##NO_TEXT,
+    gc_commit             TYPE string VALUE 'c0d0656' ##NO_TEXT,
+    gc_date               TYPE string VALUE '2025-11-11 19:32:08 UTC' ##NO_TEXT,
     gc_url_github_version TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/version.txt'  ##NO_TEXT,
     gc_url_github_raw     TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/%23awslabs%23sdk_installer.prog.abap'  ##NO_TEXT.
 ENDINTERFACE.
@@ -608,6 +608,8 @@ INTERFACE lif_sdk_certificate_manager.
   METHODS:
 
     install_amazon_root_certs RETURNING VALUE(r_success) TYPE abap_bool RAISING lcx_error,
+    get_missing_amazon_root_certs RETURNING VALUE(rt_missing) TYPE tt_certificate,
+    get_missing_github_root_certs RETURNING VALUE(rt_missing) TYPE tt_certificate,
     is_cert_installed IMPORTING i_subject       TYPE string
                       RETURNING VALUE(r_result) TYPE abap_bool
                       RAISING   lcx_error.
@@ -641,10 +643,6 @@ CLASS lcl_sdk_certificate_manager DEFINITION FINAL.
       init_github_root_certs,
       set_cert_status CHANGING ct_certificates TYPE lif_sdk_certificate_manager~tt_certificate
                       RAISING  lcx_error,
-      get_missing_amazon_root_certs RETURNING VALUE(rt_missing) TYPE lif_sdk_certificate_manager~tt_certificate,
-      get_missing_github_root_certs RETURNING VALUE(rt_missing) TYPE lif_sdk_certificate_manager~tt_certificate,
-      retrieve_missing_certificates RETURNING VALUE(r_result) TYPE abap_bool
-                                    RAISING   lcx_error,
       inform_icm_pse_changed RAISING lcx_error,
       check_bapiret IMPORTING it_bapiret2 TYPE bapiret2_t
                     RAISING   lcx_error.
@@ -669,8 +667,6 @@ CLASS lcl_sdk_certificate_manager IMPLEMENTATION.
     set_cert_status( CHANGING ct_certificates = amazon_root_certs ). " Sets the certificates' status to installed/not installed
 
     set_cert_status( CHANGING ct_certificates = github_root_certs ).
-
-    retrieve_missing_certificates( ).   "TODO: Needs to go to ui tree
 
   ENDMETHOD.
 
@@ -845,7 +841,7 @@ CLASS lcl_sdk_certificate_manager IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD get_missing_amazon_root_certs.
+  METHOD lif_sdk_certificate_manager~get_missing_amazon_root_certs.
     LOOP AT amazon_root_certs INTO DATA(wa_root_cert).
       IF wa_root_cert-installed = abap_false AND sy-tabix > 4. " Certs that are mentioned in the ABAP SDK docs appear after tabix 4
         APPEND wa_root_cert TO rt_missing.
@@ -853,7 +849,7 @@ CLASS lcl_sdk_certificate_manager IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
-  METHOD get_missing_github_root_certs.
+  METHOD lif_sdk_certificate_manager~get_missing_github_root_certs.
     LOOP AT github_root_certs INTO DATA(wa_root_cert).
       IF wa_root_cert-installed = abap_false. " Certs that are mentioned in the ABAP SDK docs appear after tabix 4
         APPEND wa_root_cert TO rt_missing.
@@ -863,51 +859,7 @@ CLASS lcl_sdk_certificate_manager IMPLEMENTATION.
 
 
   "TODO: Move to ui tree
-  METHOD retrieve_missing_certificates.
 
-    IF lines( get_missing_amazon_root_certs( ) ) > 0.
-
-      DATA lv_text TYPE string.
-      lv_text = |It appears your system is missing one or more of the five Amazon Root SSL Certificates. |
-                && |These certificates have to be installed in order to download and use the newest version of the ABAP SDK. |
-                && |The report can download and maintain them automatically for you if your SAP system has an Internet connection. |
-                && |Amazon Root SSL Certificates are available from https://www.amazontrust.com/repository/ | ##NO_TEXT.
-
-      DATA lv_answer TYPE c.
-
-      CALL FUNCTION 'POPUP_TO_CONFIRM'
-        EXPORTING
-          titlebar              = ' '
-          diagnose_object       = ' '
-          text_question         = lv_text
-          text_button_1         = |Do it for me|
-          icon_button_1         = ' '
-          text_button_2         = |Not now|
-          icon_button_2         = ' '
-          default_button        = '1'
-          display_cancel_button = ' '
-          userdefined_f1_help   = ' '
-          start_column          = 25
-          start_row             = 6
-          iv_quickinfo_button_1 = ' '
-          iv_quickinfo_button_2 = ' '
-        IMPORTING
-          answer                = lv_answer
-        EXCEPTIONS
-          text_not_found        = 1
-          OTHERS                = 2 ##NO_TEXT.
-      IF sy-subrc <> 0.
-        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
-      ENDIF.
-
-      IF lv_answer = 1.
-        lif_sdk_certificate_manager~install_amazon_root_certs( ).
-      ELSE.
-        LEAVE PROGRAM.
-      ENDIF.
-    ENDIF.
-
-  ENDMETHOD.
 
 
   METHOD lif_sdk_certificate_manager~install_amazon_root_certs.
@@ -2222,6 +2174,8 @@ CLASS lcl_sdk_package_manager DEFINITION FINAL.
                           RAISING   lcx_error,
       is_deprecated IMPORTING i_tla           TYPE lcl_sdk_module=>t_tla
                     RETURNING VALUE(r_result) TYPE abap_bool,
+      retrieve_missing_certificates RETURNING VALUE(r_result) TYPE abap_bool
+                                    RAISING   lcx_error,
       is_core_installed RETURNING VALUE(r_result) TYPE abap_bool,
       is_module_core IMPORTING i_tla           TYPE lcl_sdk_module=>t_tla
                      RETURNING VALUE(r_result) TYPE abap_bool,
@@ -2319,6 +2273,10 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
 
     mt_installed_modules = get_sdk_installed_modules( ).
 
+
+
+    retrieve_missing_certificates( ).
+
     mt_available_modules_inst = get_sdk_avail_modules_json( i_operation = 'install'
                                                             i_source    = 'web'
                                                             i_version   = 'LATEST' ) ##NO_TEXT.
@@ -2336,6 +2294,52 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
   METHOD is_deprecated.
     DATA(deprecated_modules) = get_sdk_deprecated_mod_inst( ).
     r_result = xsdbool( line_exists( deprecated_modules[ tla = i_tla ] ) ).
+  ENDMETHOD.
+
+  METHOD retrieve_missing_certificates.
+
+    IF lines( certificate_manager->get_missing_amazon_root_certs( ) ) > 0.
+
+      DATA lv_text TYPE string.
+      lv_text = |It appears your system is missing one or more of the five Amazon Root SSL Certificates. |
+                && |These certificates have to be installed in order to download and use the newest version of the ABAP SDK. |
+                && |The report can download and maintain them automatically for you if your SAP system has an Internet connection. |
+                && |Amazon Root SSL Certificates are available from https://www.amazontrust.com/repository/ | ##NO_TEXT.
+
+      DATA lv_answer TYPE c.
+
+      CALL FUNCTION 'POPUP_TO_CONFIRM'
+        EXPORTING
+          titlebar              = ' '
+          diagnose_object       = ' '
+          text_question         = lv_text
+          text_button_1         = |Do it for me|
+          icon_button_1         = ' '
+          text_button_2         = |Not now|
+          icon_button_2         = ' '
+          default_button        = '1'
+          display_cancel_button = ' '
+          userdefined_f1_help   = ' '
+          start_column          = 25
+          start_row             = 6
+          iv_quickinfo_button_1 = ' '
+          iv_quickinfo_button_2 = ' '
+        IMPORTING
+          answer                = lv_answer
+        EXCEPTIONS
+          text_not_found        = 1
+          OTHERS                = 2 ##NO_TEXT.
+      IF sy-subrc <> 0.
+        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
+      ENDIF.
+
+      IF lv_answer = 1.
+        certificate_manager->install_amazon_root_certs( ).
+      ELSE.
+        LEAVE PROGRAM.
+      ENDIF.
+    ENDIF.
+
   ENDMETHOD.
 
 
@@ -5625,7 +5629,6 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
     ENDIF.
 
   ENDMETHOD.
-
 
 
   METHOD toggle_inst_modules.
