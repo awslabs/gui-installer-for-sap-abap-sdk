@@ -37,6 +37,8 @@ INTERFACE lif_sdk_job_manager DEFERRED.
 INTERFACE lif_ui_constants DEFERRED.
 INTERFACE lif_ui_command DEFERRED.
 
+
+CLASS lcl_sdk_installer DEFINITION DEFERRED.
 CLASS lcl_sdk_zipfile DEFINITION DEFERRED.
 CLASS lcl_sdk_zipfile_collection DEFINITION DEFERRED.
 CLASS lcl_sdk_module DEFINITION DEFERRED.
@@ -67,15 +69,16 @@ CLASS lcl_ui_command_btc_dtl DEFINITION DEFERRED.
 CLASS lcl_ui_command_chk_upd DEFINITION DEFERRED.
 CLASS lcl_ui_utils DEFINITION DEFERRED.
 
-CLASS lcx_error DEFINITION DEFERRED.
 CLASS lcl_main DEFINITION DEFERRED.
+
+CLASS lcx_error DEFINITION DEFERRED.
 
 
 INTERFACE lif_global_constants.
   CONSTANTS:
-    gc_version TYPE string VALUE '1.1.6' ##NO_TEXT,
-    gc_commit  TYPE string VALUE 'e5bf02b' ##NO_TEXT,
-    gc_date    TYPE string VALUE '2025-11-10 22:48:49 UTC' ##NO_TEXT,
+    gc_version TYPE string VALUE '1.1.9' ##NO_TEXT,
+    gc_commit  TYPE string VALUE '8de3e49' ##NO_TEXT,
+    gc_date    TYPE string VALUE '2025-11-14 20:36:15 UTC' ##NO_TEXT,
     gc_url_github_version TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/version.txt'  ##NO_TEXT,
     gc_url_github_raw     TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/%23awslabs%23sdk_installer.prog.abap'  ##NO_TEXT.
 ENDINTERFACE.
@@ -332,15 +335,36 @@ INTERFACE lif_sdk_internet_manager.
 ENDINTERFACE.
 
 
-CLASS lcl_sdk_internet_manager DEFINITION FINAL.
+CLASS lcl_sdk_internet_manager DEFINITION FINAL CREATE PRIVATE.
 
   PUBLIC SECTION.
     INTERFACES:
       lif_sdk_internet_manager.
 
+    CLASS-METHODS:
+      get_instance RETURNING VALUE(r_internet_manager) TYPE REF TO lif_sdk_internet_manager.
+
+  PRIVATE SECTION.
+    CLASS-DATA:
+      internet_manager TYPE REF TO lif_sdk_internet_manager.
+
+    METHODS:
+      constructor.
+
 ENDCLASS.
 
 CLASS lcl_sdk_internet_manager IMPLEMENTATION.
+
+  METHOD constructor.
+
+  ENDMETHOD.
+
+  METHOD get_instance.
+    IF internet_manager IS NOT BOUND.
+      internet_manager = NEW lcl_sdk_internet_manager( ).
+    ENDIF.
+    r_internet_manager = internet_manager.
+  ENDMETHOD.
 
   METHOD lif_sdk_internet_manager~download.
 
@@ -460,19 +484,23 @@ INTERFACE lif_sdk_report_update_manager.
 ENDINTERFACE.
 
 
-CLASS lcl_sdk_report_update_manager DEFINITION FINAL.
+CLASS lcl_sdk_report_update_manager DEFINITION FINAL CREATE PRIVATE.
 
   PUBLIC SECTION.
     INTERFACES:
       lif_sdk_report_update_manager.
 
-    METHODS:
-      constructor IMPORTING i_internet_manager TYPE REF TO lif_sdk_internet_manager OPTIONAL.
+    CLASS-METHODS:
+      get_instance RETURNING VALUE(r_report_update_manager) TYPE REF TO lif_sdk_report_update_manager.
 
   PRIVATE SECTION.
+    CLASS-DATA:
+      report_update_manager TYPE REF TO lif_sdk_report_update_manager.
+
     DATA: internet_manager TYPE REF TO lif_sdk_internet_manager.
 
     METHODS:
+      constructor IMPORTING i_internet_manager TYPE REF TO lif_sdk_internet_manager OPTIONAL,
       download_report IMPORTING i_url_github_raw        TYPE w3_url
                       RETURNING VALUE(r_report_xstring) TYPE xstring
                       RAISING   lcx_error,
@@ -484,13 +512,19 @@ ENDCLASS.
 
 CLASS lcl_sdk_report_update_manager IMPLEMENTATION.
 
-
   METHOD constructor.
     IF i_internet_manager IS BOUND.
       internet_manager = i_internet_manager.
     ELSE.
-      internet_manager = NEW lcl_sdk_internet_manager( ).
+      internet_manager = lcl_sdk_internet_manager=>get_instance( ).
     ENDIF.
+  ENDMETHOD.
+
+  METHOD get_instance.
+    IF report_update_manager IS NOT BOUND.
+      report_update_manager = NEW lcl_sdk_report_update_manager( ).
+    ENDIF.
+    r_report_update_manager = report_update_manager.
   ENDMETHOD.
 
   METHOD lif_sdk_report_update_manager~update_report.
@@ -574,16 +608,15 @@ CLASS lcl_sdk_report_update_manager IMPLEMENTATION.
     DATA: object TYPE e071-object VALUE 'REPS'.
 
     CALL FUNCTION 'RS_WORKING_OBJECT_ACTIVATE'
-     EXPORTING
-       OBJECT                           = object
-       OBJ_NAME                         = obj_name
-     EXCEPTIONS
-       OBJECT_NOT_IN_WORKING_AREA       = 1
-       EXECUTION_ERROR                  = 2
-       CANCELLED                        = 3
-       INSERT_INTO_CORR_ERROR           = 4
-       OTHERS                           = 5
-              .
+      EXPORTING
+        object                     = object
+        obj_name                   = obj_name
+      EXCEPTIONS
+        object_not_in_working_area = 1
+        execution_error            = 2
+        cancelled                  = 3
+        insert_into_corr_error     = 4
+        OTHERS                     = 5.
     IF sy-subrc <> 0.
       RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Failed to activate report update!| ##NO_TEXT..
     ENDIF.
@@ -597,40 +630,59 @@ ENDCLASS.
 
 INTERFACE lif_sdk_certificate_manager.
 
-  TYPES: BEGIN OF ts_amazon_root_certificate,
+  TYPES: BEGIN OF ts_certificate,
            subject   TYPE string,
            uri       TYPE w3_url,
            binary    TYPE xstring,
            installed TYPE abap_bool,
-         END OF ts_amazon_root_certificate.
+         END OF ts_certificate.
 
-  TYPES: tt_amazon_root_certificate TYPE STANDARD TABLE OF ts_amazon_root_certificate WITH KEY subject.
+  TYPES: tt_certificate TYPE STANDARD TABLE OF ts_certificate WITH KEY subject.
 
   METHODS:
 
-    install_amazon_root_certs RETURNING VALUE(r_success) TYPE abap_bool RAISING lcx_error.
+    install_amazon_root_certs RAISING lcx_error,
+    "install_github_root_certs raising lcx_error    " TODO
+    get_missing_amazon_root_certs RETURNING VALUE(rt_missing) TYPE tt_certificate,
+    get_missing_github_root_certs RETURNING VALUE(rt_missing) TYPE tt_certificate,
+    is_cert_installed IMPORTING i_subject       TYPE string
+                      RETURNING VALUE(r_result) TYPE abap_bool
+                      RAISING   lcx_error.
 
 ENDINTERFACE.
 
 
-CLASS lcl_sdk_certificate_manager DEFINITION FINAL.
+CLASS lcl_sdk_certificate_manager DEFINITION FINAL CREATE PRIVATE.
 
   PUBLIC SECTION.
     INTERFACES:
       lif_sdk_certificate_manager.
 
-    METHODS:
-      constructor IMPORTING i_internet_manager TYPE REF TO lif_sdk_internet_manager OPTIONAL RAISING lcx_error.
+    CLASS-METHODS:
+      get_instance RETURNING VALUE(r_certificate_manager) TYPE REF TO lif_sdk_certificate_manager.
 
 
   PRIVATE SECTION.
-    DATA: internet_manager TYPE REF TO lif_sdk_internet_manager.
-    DATA: mt_amazon_root_certs TYPE lif_sdk_certificate_manager~tt_amazon_root_certificate. " populated in set_amazon_root_cert_values
+
+    CONSTANTS: c_pse_context  TYPE ssf_s_strust_identity-pse_context VALUE 'SSLC' ##NO_TEXT,
+               c_pse_applic   TYPE ssf_s_strust_identity-pse_applic VALUE 'DFAULT' ##NO_TEXT,
+               c_pse_descript TYPE ssf_s_strust_identity-pse_descript VALUE 'SSL Client (Standard)' ##NO_TEXT,
+               c_pse_sprsl    TYPE ssf_s_strust_identity-sprsl VALUE 'E' ##NO_TEXT.
+
+    CLASS-DATA:
+        certificate_manager TYPE REF TO lif_sdk_certificate_manager.
+
+    DATA: internet_manager  TYPE REF TO lif_sdk_internet_manager,
+          amazon_root_certs TYPE lif_sdk_certificate_manager~tt_certificate, "populated in init_amazon_root_certs
+          github_root_certs TYPE lif_sdk_certificate_manager~tt_certificate. "populated in init_github_root_certs
 
     METHODS:
-      set_amazon_root_cert_values,
-      set_amazon_root_cert_status RAISING lcx_error,
-      retrieve_missing_certificates RETURNING VALUE(r_result) TYPE abap_bool RAISING lcx_error,
+      constructor IMPORTING i_internet_manager TYPE REF TO lif_sdk_internet_manager OPTIONAL RAISING lcx_error,
+      init_amazon_root_certs,
+      init_github_root_certs,
+      set_cert_status CHANGING ct_certificates TYPE lif_sdk_certificate_manager~tt_certificate
+                      RAISING  lcx_error,
+      inform_icm_pse_changed RAISING lcx_error,
       check_bapiret IMPORTING it_bapiret2 TYPE bapiret2_t
                     RAISING   lcx_error.
 
@@ -639,131 +691,101 @@ ENDCLASS.
 
 CLASS lcl_sdk_certificate_manager IMPLEMENTATION.
 
+  METHOD get_instance.
+    IF certificate_manager IS NOT BOUND.
+      TRY.
+          certificate_manager = NEW lcl_sdk_certificate_manager( ).
+        CATCH lcx_error INTO DATA(ex).
+          ex->show( ).
+      ENDTRY.
+    ENDIF.
+    r_certificate_manager = certificate_manager.
+  ENDMETHOD.
+
   METHOD constructor.
 
     IF i_internet_manager IS BOUND.
       internet_manager = i_internet_manager.
     ELSE.
-      internet_manager = NEW lcl_sdk_internet_manager( ).
+      internet_manager = lcl_sdk_internet_manager=>get_instance( ).
     ENDIF.
 
-    set_amazon_root_cert_values( ). " Sets certificate URLs in member table
+    init_amazon_root_certs( ).
 
-    set_amazon_root_cert_status( ). " Sets the certificates' status to installed/not installed
+    init_github_root_certs( ).
 
-    retrieve_missing_certificates( ).
+    set_cert_status( CHANGING ct_certificates = amazon_root_certs ). " Sets the certificates' status to installed/not installed
+
+    set_cert_status( CHANGING ct_certificates = github_root_certs ).
 
   ENDMETHOD.
 
 
-
-  METHOD retrieve_missing_certificates.
-
-    DATA lt_missing_certs TYPE lif_sdk_certificate_manager~tt_amazon_root_certificate.
-    LOOP AT mt_amazon_root_certs INTO DATA(wa_amazon_root_cert).
-      IF wa_amazon_root_cert-installed = abap_false AND sy-tabix > 4. " Certs that are mentioned in the ABAP SDK docs appear after tabix 4
-        APPEND wa_amazon_root_cert TO lt_missing_certs.
-      ENDIF.
-    ENDLOOP.
-
-    IF lines( lt_missing_certs ) > 0.
-
-      DATA lv_text TYPE string.
-      lv_text = |It appears your system is missing one or more of the five Amazon Root SSL Certificates. |
-                && |These certificates have to be installed in order to download and use the newest version of the ABAP SDK. |
-                && |The report can download and maintain them automatically for you if your SAP system has an Internet connection. |
-                && |Amazon Root SSL Certificates are available from https://www.amazontrust.com/repository/ | ##NO_TEXT.
-
-      DATA lv_answer TYPE c.
-
-      CALL FUNCTION 'POPUP_TO_CONFIRM'
-        EXPORTING
-          titlebar              = ' '
-          diagnose_object       = ' '
-          text_question         = lv_text
-          text_button_1         = |Do it for me|
-          icon_button_1         = ' '
-          text_button_2         = |Not now|
-          icon_button_2         = ' '
-          default_button        = '1'
-          display_cancel_button = ' '
-          userdefined_f1_help   = ' '
-          start_column          = 25
-          start_row             = 6
-          iv_quickinfo_button_1 = ' '
-          iv_quickinfo_button_2 = ' '
-        IMPORTING
-          answer                = lv_answer
-        EXCEPTIONS
-          text_not_found        = 1
-          OTHERS                = 2 ##NO_TEXT.
-      IF sy-subrc <> 0.
-        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
-      ENDIF.
-
-      IF lv_answer = 1.
-        lif_sdk_certificate_manager~install_amazon_root_certs( ).
-      ELSE.
-        LEAVE PROGRAM.
-      ENDIF.
-    ENDIF.
-
-  ENDMETHOD.
-
-
-  METHOD set_amazon_root_cert_values.
+  METHOD init_amazon_root_certs.
     INSERT VALUE #( subject = 'CN=Amazon RSA 2048 M01, O=Amazon, C=US'
-                    uri = 'http://crt.r2m01.amazontrust.com/r2m01.cer'
-                    binary = ''
-                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 1 ##NO_TEXT.
+              uri = 'http://crt.r2m01.amazontrust.com/r2m01.cer'
+              binary = ''
+              installed = abap_false ) INTO me->amazon_root_certs INDEX 1 ##NO_TEXT.
     INSERT VALUE #( subject = 'CN=Amazon RSA 2048 M02, O=Amazon, C=US'
                     uri = 'http://crt.r2m01.amazontrust.com/r2m02.cer'
                     binary = ''
-                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 2 ##NO_TEXT.
+                    installed = abap_false ) INTO me->amazon_root_certs INDEX 2 ##NO_TEXT.
     INSERT VALUE #( subject = 'CN=Amazon RSA 2048 M03, O=Amazon, C=US'
                     uri = 'http://crt.r2m01.amazontrust.com/r2m03.cer'
                     binary = ''
-                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 3 ##NO_TEXT.
+                    installed = abap_false ) INTO me->amazon_root_certs INDEX 3 ##NO_TEXT.
     INSERT VALUE #( subject = 'CN=Amazon RSA 2048 M04, O=Amazon, C=US'
                     uri = 'http://crt.r2m01.amazontrust.com/r2m04.cer'
                     binary = ''
-                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 4 ##NO_TEXT.
+                    installed = abap_false ) INTO me->amazon_root_certs INDEX 4 ##NO_TEXT.
     INSERT VALUE #( subject = 'CN=Amazon Root CA 1, O=Amazon, C=US'
                     uri = 'https://www.amazontrust.com/repository/AmazonRootCA1.cer'
                     binary = ''
-                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 5 ##NO_TEXT.
+                    installed = abap_false ) INTO me->amazon_root_certs INDEX 5 ##NO_TEXT.
     INSERT VALUE #( subject = 'CN=Amazon Root CA 2, O=Amazon, C=US'
                     uri = 'https://www.amazontrust.com/repository/AmazonRootCA2.cer'
                     binary = ''
-                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 6 ##NO_TEXT.
+                    installed = abap_false ) INTO me->amazon_root_certs INDEX 6 ##NO_TEXT.
     INSERT VALUE #( subject = 'CN=Amazon Root CA 3, O=Amazon, C=US'
                     uri = 'https://www.amazontrust.com/repository/AmazonRootCA3.cer'
                     binary = ''
-                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 7 ##NO_TEXT.
+                    installed = abap_false ) INTO me->amazon_root_certs INDEX 7 ##NO_TEXT.
     INSERT VALUE #( subject = 'CN=Amazon Root CA 4, O=Amazon, C=US'
                     uri = 'https://www.amazontrust.com/repository/AmazonRootCA4.cer'
                     binary = ''
-                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 8 ##NO_TEXT.
+                    installed = abap_false ) INTO me->amazon_root_certs INDEX 8 ##NO_TEXT.
     INSERT VALUE #( subject = 'CN=Starfield Services Root Certificate Authority - G2, O="Starfield Technologies, Inc.", L=Scottsdale, SP=Arizona, C=US'
                     uri = 'https://www.amazontrust.com/repository/SFSRootCAG2.cer'
                     binary = ''
-                    installed = abap_false ) INTO me->mt_amazon_root_certs INDEX 9 ##NO_TEXT.
+                    installed = abap_false ) INTO me->amazon_root_certs INDEX 9 ##NO_TEXT.
   ENDMETHOD.
 
 
-  METHOD set_amazon_root_cert_status.
+  METHOD init_github_root_certs.
+    INSERT VALUE #( subject = 'C=GB, ST=Greater Manchester, L=Salford, O=Sectigo Limited, CN=Sectigo ECC Domain Validation Secure Server CA'
+              uri = 'http://crt.sectigo.com/SectigoECCDomainValidationSecureServerCA.crt'
+              binary = ''
+              installed = abap_false ) INTO me->github_root_certs INDEX 1 ##NO_TEXT.
+
+    INSERT VALUE #( subject = 'C=US, ST=New Jersey, L=Jersey City, O=The USERTRUST Network, CN=USERTrust ECC Certification Authority'
+                uri = 'http://crt.usertrust.com/USERTrustECCAddTrustCA.crt'
+                binary = ''
+                installed = abap_false ) INTO me->github_root_certs INDEX 2 ##NO_TEXT.
+  ENDMETHOD.
+
+
+  METHOD set_cert_status.
 
     DATA ls_strust_identity TYPE ssf_s_strust_identity.
     DATA lt_certificatelist TYPE ssfbintab.
-    DATA wa_certificate_binary TYPE LINE OF ssfbintab.
-    DATA wa_amazon_root_cert TYPE lif_sdk_certificate_manager~ts_amazon_root_certificate.
+    DATA wa_cert TYPE lif_sdk_certificate_manager~ts_certificate.
     DATA lt_bapiret2 TYPE STANDARD TABLE OF bapiret2.
 
 
-    ls_strust_identity-pse_context = 'SSLC'.
-    ls_strust_identity-pse_applic = 'DFAULT'.
-    ls_strust_identity-pse_descript = 'SSL Client (Standard)' ##NO_TEXT.
-    ls_strust_identity-sprsl = 'E'.
+    ls_strust_identity-pse_context = c_pse_context.
+    ls_strust_identity-pse_applic = c_pse_applic.
+    ls_strust_identity-pse_descript = c_pse_descript ##NO_TEXT.
+    ls_strust_identity-sprsl = c_pse_sprsl.
 
 
     CALL FUNCTION 'SSFR_GET_CERTIFICATELIST'
@@ -784,11 +806,11 @@ CLASS lcl_sdk_certificate_manager IMPLEMENTATION.
     DATA l_validto TYPE string.
     DATA l_algid TYPE string.
 
-    LOOP AT lt_certificatelist INTO wa_certificate_binary.
+    LOOP AT lt_certificatelist INTO DATA(certificate).
 
       CALL FUNCTION 'SSFR_PARSE_CERTIFICATE'
         EXPORTING
-          iv_certificate = wa_certificate_binary
+          iv_certificate = certificate
         IMPORTING
           ev_subject     = l_subject
           ev_issuer      = l_issuer
@@ -800,25 +822,99 @@ CLASS lcl_sdk_certificate_manager IMPLEMENTATION.
           et_bapiret2    = lt_bapiret2.
       check_bapiret( lt_bapiret2 ).
 
-      READ TABLE mt_amazon_root_certs WITH TABLE KEY subject = l_subject INTO wa_amazon_root_cert.
+      READ TABLE ct_certificates WITH TABLE KEY subject = l_subject INTO wa_cert.
 
       IF sy-subrc = 0.  " found existing certificate
-        wa_amazon_root_cert-binary = wa_certificate_binary.
-        wa_amazon_root_cert-installed = abap_true.
-        MODIFY TABLE mt_amazon_root_certs FROM wa_amazon_root_cert.
+        wa_cert-binary = certificate.
+        wa_cert-installed = abap_true.
+        MODIFY TABLE ct_certificates FROM wa_cert.
       ENDIF.
 
       CLEAR: l_subject, l_issuer, l_serialno, l_validfrom, l_validto, l_algid.
-      CLEAR wa_amazon_root_cert.
+      CLEAR wa_cert.
       CLEAR lt_bapiret2.
     ENDLOOP.
 
   ENDMETHOD.
 
 
+
+  METHOD lif_sdk_certificate_manager~is_cert_installed.
+    DATA ls_strust_identity TYPE ssf_s_strust_identity.
+    DATA lt_certificatelist TYPE ssfbintab.
+    DATA wa_amazon_root_cert TYPE lif_sdk_certificate_manager~ts_certificate.
+    DATA lt_bapiret2 TYPE STANDARD TABLE OF bapiret2.
+
+    ls_strust_identity-pse_context = c_pse_context.
+    ls_strust_identity-pse_applic = c_pse_applic.
+    ls_strust_identity-pse_descript = c_pse_descript ##NO_TEXT.
+    ls_strust_identity-sprsl = c_pse_sprsl.
+
+    CALL FUNCTION 'SSFR_GET_CERTIFICATELIST'
+      EXPORTING
+        is_strust_identity = ls_strust_identity
+      IMPORTING
+        et_certificatelist = lt_certificatelist
+      TABLES
+        et_bapiret2        = lt_bapiret2.
+    check_bapiret( lt_bapiret2 ).
+
+    DATA l_subject TYPE string.
+    DATA l_issuer TYPE string.
+    DATA l_serialno TYPE string.
+    DATA l_validfrom TYPE string.
+    DATA l_validto TYPE string.
+    DATA l_algid TYPE string.
+
+    LOOP AT lt_certificatelist INTO DATA(certificate).
+      CALL FUNCTION 'SSFR_PARSE_CERTIFICATE'
+        EXPORTING
+          iv_certificate = certificate
+        IMPORTING
+          ev_subject     = l_subject
+          ev_issuer      = l_issuer
+          ev_serialno    = l_serialno
+          ev_validfrom   = l_validfrom
+          ev_validto     = l_validto
+          ev_algid       = l_algid
+        TABLES
+          et_bapiret2    = lt_bapiret2.
+      check_bapiret( lt_bapiret2 ).
+      IF l_subject CS i_subject.  " found existing certificate
+        r_result = abap_true.
+        RETURN.
+      ENDIF.
+      CLEAR: l_subject, l_issuer, l_serialno, l_validfrom, l_validto, l_algid.
+      CLEAR wa_amazon_root_cert.
+      CLEAR lt_bapiret2.
+    ENDLOOP.
+  ENDMETHOD.
+
+
+  METHOD lif_sdk_certificate_manager~get_missing_amazon_root_certs.
+    LOOP AT amazon_root_certs INTO DATA(wa_root_cert).
+      IF wa_root_cert-installed = abap_false AND sy-tabix > 4. " Certs that are mentioned in the ABAP SDK docs appear after tabix 4
+        APPEND wa_root_cert TO rt_missing.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD lif_sdk_certificate_manager~get_missing_github_root_certs.
+    LOOP AT github_root_certs INTO DATA(wa_root_cert).
+      IF wa_root_cert-installed = abap_false. " Certs that are mentioned in the ABAP SDK docs appear after tabix 4
+        APPEND wa_root_cert TO rt_missing.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+
+  "TODO: Move to ui tree
+
+
+
   METHOD lif_sdk_certificate_manager~install_amazon_root_certs.
 
-    DATA wa_amazon_root_cert TYPE lif_sdk_certificate_manager~ts_amazon_root_certificate.
+    DATA wa_amazon_root_cert TYPE lif_sdk_certificate_manager~ts_certificate.
 
     DATA ls_strust_identity TYPE ssf_s_strust_identity.
     DATA lt_bapiret2 TYPE STANDARD TABLE OF bapiret2.
@@ -827,13 +923,15 @@ CLASS lcl_sdk_certificate_manager IMPLEMENTATION.
     DATA l_abap_regex_pcre TYPE REF TO cl_abap_regex.
 
 
-    ls_strust_identity-pse_context = 'SSLC' ##NO_TEXT.
-    ls_strust_identity-pse_applic = 'DFAULT' ##NO_TEXT.
-    ls_strust_identity-pse_descript = 'SSL Client (Standard)' ##NO_TEXT.
-    ls_strust_identity-sprsl = 'E'.
+    ls_strust_identity-pse_context = c_pse_context .
+    ls_strust_identity-pse_applic = c_pse_applic.
+    ls_strust_identity-pse_descript = c_pse_descript.
+    ls_strust_identity-sprsl = c_pse_sprsl.
 
     " root cert URLS set in set_amazon_root_cert_values
-    LOOP AT mt_amazon_root_certs INTO wa_amazon_root_cert FROM 1 TO 4.
+    LOOP AT amazon_root_certs INTO wa_amazon_root_cert FROM 1 TO 4.
+
+
 
       IF wa_amazon_root_cert-installed = abap_true.
         CONTINUE.
@@ -854,18 +952,10 @@ CLASS lcl_sdk_certificate_manager IMPLEMENTATION.
 
     ENDLOOP.
 
-    CALL FUNCTION 'ICM_SSL_PSE_CHANGED'
-      EXCEPTIONS
-        icm_op_failed       = 1
-        icm_get_serv_failed = 2
-        icm_auth_failed     = 3
-        OTHERS              = 4.
-    IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Error updating PSE| ##NO_TEXT.
-    ENDIF.
+    inform_icm_pse_changed( ).
 
     " root cert URLS set in set_amazon_root_cert_values
-    LOOP AT mt_amazon_root_certs INTO wa_amazon_root_cert FROM 5.
+    LOOP AT amazon_root_certs INTO wa_amazon_root_cert FROM 5.
 
       IF wa_amazon_root_cert-installed = abap_true.
         CONTINUE.
@@ -888,8 +978,18 @@ CLASS lcl_sdk_certificate_manager IMPLEMENTATION.
 
     MESSAGE |Certificates installed.| TYPE 'S' ##NO_TEXT.
 
-    r_success = abap_true .
+  ENDMETHOD.
 
+  METHOD inform_icm_pse_changed.
+    CALL FUNCTION 'ICM_SSL_PSE_CHANGED'
+      EXCEPTIONS
+        icm_op_failed       = 1
+        icm_get_serv_failed = 2
+        icm_auth_failed     = 3
+        OTHERS              = 4.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Error updating PSE.| ##NO_TEXT.
+    ENDIF.
   ENDMETHOD.
 
 
@@ -911,6 +1011,7 @@ CLASS lcl_sdk_certificate_manager IMPLEMENTATION.
 ENDCLASS.
 
 
+
 INTERFACE lif_sdk_file_manager.
 
   METHODS:
@@ -930,15 +1031,37 @@ INTERFACE lif_sdk_file_manager.
 
 ENDINTERFACE.
 
-CLASS lcl_sdk_file_manager DEFINITION FINAL.
+CLASS lcl_sdk_file_manager DEFINITION FINAL CREATE PRIVATE.
 
   PUBLIC SECTION.
     INTERFACES:
       lif_sdk_file_manager.
 
+    CLASS-METHODS:
+      get_instance RETURNING VALUE(r_file_manager) TYPE REF TO lif_sdk_file_manager.
+
+
+  PRIVATE SECTION.
+    CLASS-DATA:
+       file_manager TYPE REF TO lif_sdk_file_manager.
+
+    METHODS:
+      constructor.
+
 ENDCLASS.
 
 CLASS lcl_sdk_file_manager IMPLEMENTATION.
+
+  METHOD constructor.
+
+  ENDMETHOD.
+
+  METHOD get_instance.
+    IF file_manager IS NOT BOUND.
+      file_manager = NEW lcl_sdk_file_manager( ).
+    ENDIF.
+    r_file_manager = file_manager.
+  ENDMETHOD.
 
   METHOD lif_sdk_file_manager~get_file_from_zip.
     DATA lv_zipfile_content TYPE xstring.
@@ -1082,31 +1205,43 @@ INTERFACE lif_sdk_transport_manager.
 
 ENDINTERFACE.
 
-CLASS lcl_sdk_transport_manager DEFINITION FINAL.
+CLASS lcl_sdk_transport_manager DEFINITION FINAL CREATE PRIVATE.
 
   PUBLIC SECTION.
     INTERFACES:
       lif_sdk_transport_manager.
 
+    CLASS-METHODS:
+      get_instance RETURNING VALUE(r_transport_manager) TYPE REF TO lif_sdk_transport_manager.
+
+  PRIVATE SECTION.
+    CLASS-DATA:
+       transport_manager TYPE REF TO lif_sdk_transport_manager.
+
+    DATA:
+      file_manager TYPE REF TO lif_sdk_file_manager.
+
     METHODS:
       constructor IMPORTING i_file_manager TYPE REF TO lif_sdk_file_manager OPTIONAL.
 
-  PRIVATE SECTION.
-    DATA:
-       file_manager TYPE REF TO lif_sdk_file_manager.
-
 ENDCLASS.
+
 
 CLASS lcl_sdk_transport_manager IMPLEMENTATION.
 
   METHOD constructor.
-
     IF i_file_manager IS BOUND.
       file_manager = i_file_manager.
     ELSE.
-      file_manager = NEW lcl_sdk_file_manager( ).
+      file_manager = lcl_sdk_file_manager=>get_instance( ).
     ENDIF.
+  ENDMETHOD.
 
+  METHOD get_instance.
+    IF transport_manager IS NOT BOUND.
+      transport_manager = NEW lcl_sdk_transport_manager( ).
+    ENDIF.
+    r_transport_manager = transport_manager.
   ENDMETHOD.
 
   METHOD lif_sdk_transport_manager~write_sdk_transport_trdir.
@@ -1116,8 +1251,6 @@ CLASS lcl_sdk_transport_manager IMPLEMENTATION.
     DATA lv_filepath_cofile TYPE string.
     DATA lv_filepath_datafile TYPE string.
     DATA gv_file_name(255) TYPE c.
-
-
 
     CALL FUNCTION 'FILE_GET_NAME_USING_PATH'
       EXPORTING
@@ -1138,7 +1271,6 @@ CLASS lcl_sdk_transport_manager IMPLEMENTATION.
       lcl_sdk_utils=>raise_lpath_exception( i_cofile_name ).
     ENDIF.
 
-
     CALL FUNCTION 'FILE_VALIDATE_NAME'
       EXPORTING
         logical_filename  = lif_sdk_constants=>c_logsubdir_name
@@ -1151,8 +1283,6 @@ CLASS lcl_sdk_transport_manager IMPLEMENTATION.
       MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
         WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
     ENDIF.
-
-
 
     CALL FUNCTION 'FILE_GET_NAME_USING_PATH'
       EXPORTING
@@ -1185,7 +1315,6 @@ CLASS lcl_sdk_transport_manager IMPLEMENTATION.
       MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
         WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
     ENDIF.
-
 
     TRY.
         file_manager->open_for_output( lv_filepath_cofile ).
@@ -1365,16 +1494,37 @@ INTERFACE lif_sdk_job_manager.
 ENDINTERFACE.
 
 
-CLASS lcl_sdk_job_manager DEFINITION FINAL.
+CLASS lcl_sdk_job_manager DEFINITION FINAL CREATE PRIVATE.
 
   PUBLIC SECTION.
     INTERFACES:
       lif_sdk_job_manager.
 
+    CLASS-METHODS:
+      get_instance RETURNING VALUE(r_job_manager) TYPE REF TO lif_sdk_job_manager.
+
+  PRIVATE SECTION.
+    CLASS-DATA:
+      job_manager TYPE REF TO lif_sdk_job_manager.
+
+    METHODS:
+      constructor.
+
 ENDCLASS.
 
 
 CLASS lcl_sdk_job_manager IMPLEMENTATION.
+
+  METHOD constructor.
+
+  ENDMETHOD.
+
+  METHOD get_instance.
+    IF job_manager IS NOT BOUND.
+      job_manager = NEW lcl_sdk_job_manager( ).
+    ENDIF.
+    r_job_manager = job_manager.
+  ENDMETHOD.
 
   METHOD lif_sdk_job_manager~submit_batch_job.
 
@@ -1457,6 +1607,7 @@ CLASS lcl_sdk_job_manager IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
 
 CLASS lcl_sdk_zipfile DEFINITION FINAL.
 
@@ -1711,13 +1862,13 @@ CLASS lcl_sdk_zipfile_collection IMPLEMENTATION.
     IF i_internet_manager IS BOUND.
       internet_manager = i_internet_manager.
     ELSE.
-      internet_manager = NEW lcl_sdk_internet_manager( ).
+      internet_manager = lcl_sdk_internet_manager=>get_instance( ).
     ENDIF.
 
     IF i_file_manager IS BOUND.
       file_manager = i_file_manager.
     ELSE.
-      file_manager = NEW lcl_sdk_file_manager( ).
+      file_manager = lcl_sdk_file_manager=>get_instance( ).
     ENDIF.
 
   ENDMETHOD.
@@ -2089,40 +2240,31 @@ CLASS lcl_sdk_module_collection IMPLEMENTATION.
 ENDCLASS.
 
 
-CLASS lcl_sdk_package_manager DEFINITION FINAL.
+CLASS lcl_sdk_package_manager DEFINITION FINAL CREATE PRIVATE.
 
   PUBLIC SECTION.
 
+    CLASS-METHODS:
+      get_instance IMPORTING i_batch_mode             TYPE syst-batch
+                   RETURNING VALUE(r_package_manager) TYPE REF TO lcl_sdk_package_manager.
+
     DATA:
-      sdk_zipfiles                TYPE REF TO lcl_sdk_zipfile_collection READ-ONLY,
+      sdk_zipfiles                TYPE REF TO lcl_sdk_zipfile_collection READ-ONLY, " TODO: Refactor to use objects instead of typed tables
       mt_installed_modules        TYPE tt_sdk_module,
       mt_available_modules_inst   TYPE tt_sdk_module,   " available modules for installation  (i.e. install transports)
       mt_available_modules_uninst TYPE tt_sdk_module.   " available modules for uninstallation (i.e. uninstall transports)
 
-    DATA: internet_manager TYPE REF TO lif_sdk_internet_manager READ-ONLY.
-    DATA: certificate_manager TYPE REF TO lif_sdk_certificate_manager READ-ONLY.
-    DATA: file_manager TYPE REF TO lif_sdk_file_manager  READ-ONLY.
-    DATA: transport_manager TYPE REF TO lif_sdk_transport_manager  READ-ONLY.
-    DATA: job_manager TYPE REF TO lif_sdk_job_manager  READ-ONLY.
-    DATA: report_update_manager TYPE REF TO lif_sdk_report_update_manager READ-ONLY.
+
 
 
     METHODS:
-      constructor IMPORTING i_batch_mode           TYPE syst-batch OPTIONAL
-                            i_internet_manager     TYPE REF TO lif_sdk_internet_manager OPTIONAL
-                            i_certificate_manager  TYPE REF TO lif_sdk_certificate_manager OPTIONAL
-                            i_file_manager         TYPE REF TO lcl_sdk_file_manager OPTIONAL
-                            i_transport_manager    TYPE REF TO lif_sdk_transport_manager OPTIONAL
-                            i_job_manager          TYPE REF TO lif_sdk_job_manager OPTIONAL
-                            i_report_update_manger TYPE REF TO lif_sdk_report_update_manager OPTIONAL
-                            i_sdk_zipfiles         TYPE REF TO lcl_sdk_zipfile_collection OPTIONAL
-                  RAISING   lcx_error,
       install_all_modules IMPORTING it_modules_to_be_installed TYPE tt_sdk_tla
                                     it_modules_to_be_deleted   TYPE tt_sdk_tla
                           RETURNING VALUE(r_jobnumber)         TYPE btcjobcnt
                           RAISING   lcx_error,
       is_deprecated IMPORTING i_tla           TYPE lcl_sdk_module=>t_tla
                     RETURNING VALUE(r_result) TYPE abap_bool,
+
       is_core_installed RETURNING VALUE(r_result) TYPE abap_bool,
       is_module_core IMPORTING i_tla           TYPE lcl_sdk_module=>t_tla
                      RETURNING VALUE(r_result) TYPE abap_bool,
@@ -2154,7 +2296,24 @@ CLASS lcl_sdk_package_manager DEFINITION FINAL.
   PROTECTED SECTION.
 
   PRIVATE SECTION.
+    CLASS-DATA:
+      package_manager TYPE REF TO lcl_sdk_package_manager.
 
+    DATA: internet_manager      TYPE REF TO lif_sdk_internet_manager,
+          file_manager          TYPE REF TO lif_sdk_file_manager,
+          transport_manager     TYPE REF TO lif_sdk_transport_manager,
+          job_manager           TYPE REF TO lif_sdk_job_manager,
+          report_update_manager TYPE REF TO lif_sdk_report_update_manager.
+
+    METHODS:
+      constructor IMPORTING i_batch_mode           TYPE syst-batch OPTIONAL
+                            i_internet_manager     TYPE REF TO lif_sdk_internet_manager OPTIONAL
+                            i_file_manager         TYPE REF TO lcl_sdk_file_manager OPTIONAL
+                            i_transport_manager    TYPE REF TO lif_sdk_transport_manager OPTIONAL
+                            i_job_manager          TYPE REF TO lif_sdk_job_manager OPTIONAL
+                            i_report_update_manger TYPE REF TO lif_sdk_report_update_manager OPTIONAL
+                            i_sdk_zipfiles         TYPE REF TO lcl_sdk_zipfile_collection OPTIONAL
+                  RAISING   lcx_error.
 
 ENDCLASS.
 
@@ -2162,46 +2321,47 @@ ENDCLASS.
 
 CLASS lcl_sdk_package_manager IMPLEMENTATION.
 
-  METHOD constructor.
-
-    IF lcl_sdk_utils=>has_prod_client( ).
-      MESSAGE |System has at least one productive client, please use TMS.| TYPE 'A' ##NO_TEXT.
+  METHOD get_instance.
+    IF package_manager IS NOT BOUND.
+      TRY.
+          package_manager = NEW lcl_sdk_package_manager( i_batch_mode = i_batch_mode ). " TODO: Clean up batch mode vs foregound mode, batch should just trigger a runner exection
+        CATCH lcx_error INTO DATA(ex).
+          ex->show( ).
+      ENDTRY.
     ENDIF.
+    r_package_manager = package_manager.
+  ENDMETHOD.
+
+  METHOD constructor.
 
     IF i_internet_manager IS BOUND.
       internet_manager = i_internet_manager.
     ELSE.
-      internet_manager = NEW lcl_sdk_internet_manager( ).
-    ENDIF.
-
-    IF i_certificate_manager IS BOUND.
-      certificate_manager = i_certificate_manager.
-    ELSE.
-      certificate_manager = NEW lcl_sdk_certificate_manager( i_internet_manager = internet_manager ).
+      internet_manager = lcl_sdk_internet_manager=>get_instance( ).
     ENDIF.
 
     IF i_file_manager IS BOUND.
       file_manager = i_file_manager.
     ELSE.
-      file_manager = file_manager = NEW lcl_sdk_file_manager( ).
+      file_manager = lcl_sdk_file_manager=>get_instance( ).
     ENDIF.
 
     IF i_transport_manager IS BOUND.
       transport_manager = i_transport_manager.
     ELSE.
-      transport_manager = NEW lcl_sdk_transport_manager( i_file_manager = file_manager ).
+      transport_manager = lcl_sdk_transport_manager=>get_instance( ).
     ENDIF.
 
     IF i_job_manager IS BOUND.
       job_manager = i_job_manager.
     ELSE.
-      job_manager = NEW lcl_sdk_job_manager( ).
+      job_manager = lcl_sdk_job_manager=>get_instance( ).
     ENDIF.
 
     IF i_report_update_manger IS BOUND.
       report_update_manager = i_report_update_manger.
     ELSE.
-      report_update_manager = NEW lcl_sdk_report_update_manager( i_internet_manager = internet_manager ).
+      report_update_manager = lcl_sdk_report_update_manager=>get_instance( ).
     ENDIF.
 
     IF i_sdk_zipfiles IS BOUND.
@@ -2210,15 +2370,8 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
       sdk_zipfiles = NEW lcl_sdk_zipfile_collection( ).
     ENDIF.
 
-    TRY.
-        IF internet_manager->has_internet_access( ) = abap_false.
-          MESSAGE |This report requires HTTP(S) Internet access, please enable before usage.| TYPE 'A' ##NO_TEXT.
-        ENDIF.
-      CATCH lcx_error INTO DATA(r_error).
-        MESSAGE |This report requires HTTP(S) Internet access, please enable before usage.| TYPE 'A' ##NO_TEXT.
-    ENDTRY.
-
     mt_installed_modules = get_sdk_installed_modules( ).
+
 
     mt_available_modules_inst = get_sdk_avail_modules_json( i_operation = 'install'
                                                             i_source    = 'web'
@@ -2238,7 +2391,6 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
     DATA(deprecated_modules) = get_sdk_deprecated_mod_inst( ).
     r_result = xsdbool( line_exists( deprecated_modules[ tla = i_tla ] ) ).
   ENDMETHOD.
-
 
   METHOD install_all_modules.
 
@@ -3020,7 +3172,162 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
 
 ENDCLASS.
 
-CLASS lcl_ui_tree_controller DEFINITION FINAL.
+
+
+
+"TODO: Move all MESSAGE and POPUP calls into this class
+CLASS lcl_ui_utils DEFINITION FINAL.
+  PUBLIC SECTION.
+    CLASS-METHODS:
+      class_constructor,
+      get_running_jobs_message RETURNING VALUE(r_message) TYPE string,
+      display_job_submitted_message IMPORTING i_job_number  TYPE btcjobcnt,
+      confirm_install_all RETURNING VALUE(r_result) TYPE abap_bool RAISING lcx_error,
+      display_job_details_statusbar,
+      is_fullscreen IMPORTING i_container     TYPE REF TO cl_gui_container
+                    RETURNING VALUE(r_result) TYPE abap_bool,
+      is_sapgui_html RETURNING VALUE(r_result) TYPE abap_bool,
+      is_sapgui_timeout_sufficient RETURNING VALUE(r_result) TYPE abap_bool
+                                   RAISING   lcx_error.
+
+    CLASS-DATA:
+      job_manager TYPE REF TO lif_sdk_job_manager.
+
+ENDCLASS.
+
+CLASS lcl_ui_utils IMPLEMENTATION.
+
+  METHOD class_constructor.
+    job_manager = lcl_sdk_job_manager=>get_instance( ).
+  ENDMETHOD.
+
+  METHOD display_job_submitted_message.
+    CONCATENATE `Submitted job with number ` i_job_number INTO DATA(job_message) ##NO_TEXT.
+    MESSAGE i000(0k) WITH job_message.
+  ENDMETHOD.
+
+  METHOD get_running_jobs_message.
+
+    DATA: lt_joblist TYPE tbtcjob_tt.
+    lt_joblist = job_manager->get_running_jobs( i_jobname = sy-repid ).
+    DATA wa_job TYPE tbtcjob.
+    READ TABLE lt_joblist INTO wa_job INDEX 1.
+    IF sy-subrc <> 0.
+      MESSAGE |Expected to find exactly one job matching { sy-repid } but found { lines( lt_joblist ) }| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
+    ENDIF.
+    DATA l_job_message TYPE string.
+    CONCATENATE `Import background job currently running with number` wa_job-jobcount INTO r_message SEPARATED BY ' ' ##NO_TEXT.
+
+  ENDMETHOD.
+
+  METHOD confirm_install_all.
+    DATA(lv_text) = |Installing all modules is discouraged and should only be done in demo systems. |
+             && |Continue? | ##NO_TEXT.
+
+    DATA: lv_answer TYPE string.
+
+    CALL FUNCTION 'POPUP_TO_CONFIRM'
+      EXPORTING
+        titlebar              = ' '
+        diagnose_object       = ' '
+        text_question         = lv_text
+        text_button_1         = |Do it anyway|
+        icon_button_1         = ' '
+        text_button_2         = |Go back|
+        icon_button_2         = ' '
+        default_button        = '2'
+        display_cancel_button = ' '
+        userdefined_f1_help   = ' '
+        start_column          = 25
+        start_row             = 6
+        iv_quickinfo_button_1 = ' '
+        iv_quickinfo_button_2 = ' '
+      IMPORTING
+        answer                = lv_answer
+      EXCEPTIONS
+        text_not_found        = 1
+        OTHERS                = 2 ##NO_TEXT.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
+    ENDIF.
+
+    IF lv_answer = 1.
+      r_result = abap_true.
+    ELSE.
+      r_result = abap_false.
+    ENDIF.
+  ENDMETHOD.
+
+
+  METHOD display_job_details_statusbar.
+
+    " Job already running?
+    IF job_manager->is_job_running( ).
+
+      MESSAGE get_running_jobs_message( ) TYPE 'S' DISPLAY LIKE 'W'.
+
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD is_fullscreen.
+
+    DATA lr_gui_container TYPE REF TO cl_gui_container.
+
+    IF i_container IS NOT INITIAL.
+      lr_gui_container = i_container.
+    ELSE.
+      lr_gui_container = CAST #( cl_gui_container=>screen0->children[ 1 ] ).
+    ENDIF.
+
+    IF lr_gui_container->get_name( ) = 'TREE_CONTAINER'.
+      r_result = abap_true.
+    ELSE.
+      r_result = abap_false.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD is_sapgui_html.
+
+    DATA: lv_result TYPE abap_bool VALUE abap_false.
+
+    CALL FUNCTION 'GUI_IS_ITS'
+      IMPORTING
+        return = lv_result.
+
+    r_result = lv_result.
+
+  ENDMETHOD.
+
+  METHOD is_sapgui_timeout_sufficient.
+
+    DATA: lv_gui_auto_timeout TYPE spfpflpar-pvalue VALUE '0'.
+    DATA: lv_result TYPE abap_bool VALUE abap_false.
+
+    CALL FUNCTION 'RSAN_SYSTEM_PARAMETER_READ'
+      EXPORTING
+        i_name     = 'rdisp/gui_auto_logout'
+      IMPORTING
+        e_value    = lv_gui_auto_timeout
+      EXCEPTIONS
+        read_error = 1
+        OTHERS     = 2.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
+    ENDIF.
+
+    IF lv_gui_auto_timeout > lif_ui_constants=>c_sapgui_autologout_threshold.
+      lv_result = abap_true.
+    ENDIF.
+
+    r_result = lv_result.
+
+  ENDMETHOD.
+ENDCLASS.
+
+
+CLASS lcl_ui_tree_controller DEFINITION FINAL CREATE PRIVATE.
   PUBLIC SECTION.
 
     INTERFACES
@@ -3035,7 +3342,6 @@ CLASS lcl_ui_tree_controller DEFINITION FINAL.
 
 
     DATA:
-      sdk_package_manager          TYPE REF TO lcl_sdk_package_manager READ-ONLY,
       mr_container                 TYPE REF TO cl_gui_container,
       mr_tree                      TYPE REF TO cl_salv_tree,
       mt_treetab                   TYPE tt_sdk_module,
@@ -3053,9 +3359,11 @@ CLASS lcl_ui_tree_controller DEFINITION FINAL.
     ALIASES
       fill_container_content FOR if_salv_csqt_content_manager~fill_container_content.
 
+    CLASS-METHODS:
+      get_instance RETURNING VALUE(r_tree_controller) TYPE REF TO lcl_ui_tree_controller.
+
     METHODS:
-      constructor IMPORTING i_sdk_package_manager TYPE REF TO lcl_sdk_package_manager
-                  RAISING   lcx_error,
+      init,
       get_modules_to_be_installed IMPORTING i_target_version                  TYPE string
                                   RETURNING VALUE(rt_modules_to_be_installed) TYPE tt_sdk_tla,
       get_modules_to_be_deleted IMPORTING i_target_version                TYPE string
@@ -3091,6 +3399,17 @@ CLASS lcl_ui_tree_controller DEFINITION FINAL.
 
   PROTECTED SECTION.
   PRIVATE SECTION.
+    CLASS-DATA:
+      tree_controller TYPE REF TO lcl_ui_tree_controller.
+
+    DATA:
+      package_manager TYPE REF TO lcl_sdk_package_manager,
+      job_manager     TYPE REF TO lif_sdk_job_manager.
+
+    METHODS:
+      constructor IMPORTING i_package_manager TYPE REF TO lcl_sdk_package_manager OPTIONAL
+                            i_job_manager     TYPE REF TO lif_sdk_job_manager OPTIONAL
+                  RAISING   lcx_error.
 
 ENDCLASS.
 
@@ -3098,37 +3417,47 @@ ENDCLASS.
 CLASS lcl_ui_selection_validator DEFINITION FINAL.
   PUBLIC SECTION.
     CLASS-METHODS:
-      validate_selection IMPORTING it_modules_tbi    TYPE tt_sdk_tla
-                                   it_modules_tbd    TYPE tt_sdk_tla
-                                   i_op              TYPE string
-                                   i_salv_function   TYPE syst_ucomm
-                                   i_tree_controller TYPE REF TO lcl_ui_tree_controller
-                         RETURNING VALUE(r_result)   TYPE abap_bool
+      class_constructor,
+      validate_selection IMPORTING it_modules_tbi  TYPE tt_sdk_tla
+                                   it_modules_tbd  TYPE tt_sdk_tla
+                                   i_op            TYPE string
+                                   i_salv_function TYPE syst_ucomm
+                         RETURNING VALUE(r_result) TYPE abap_bool
                          RAISING   lcx_error,
-      check_mod_thresholds IMPORTING it_modules_tbi    TYPE tt_sdk_tla
-                                     it_modules_tbd    TYPE tt_sdk_tla
-                                     i_op              TYPE string
-                                     i_salv_function   TYPE syst_ucomm
-                                     i_tree_controller TYPE REF TO lcl_ui_tree_controller
-                           RETURNING VALUE(r_result)   TYPE abap_bool
+      check_mod_thresholds IMPORTING it_modules_tbi  TYPE tt_sdk_tla
+                                     it_modules_tbd  TYPE tt_sdk_tla
+                                     i_op            TYPE string
+                                     i_salv_function TYPE syst_ucomm
+                           RETURNING VALUE(r_result) TYPE abap_bool
                            RAISING   lcx_error,
-      check_core_validity IMPORTING it_modules_tbi    TYPE tt_sdk_tla
-                                    it_modules_tbd    TYPE tt_sdk_tla
-                                    i_op              TYPE string
-                                    i_salv_function   TYPE syst_ucomm
-                                    i_tree_controller TYPE REF TO lcl_ui_tree_controller
-                          RETURNING VALUE(r_result)   TYPE abap_bool
+      check_core_validity IMPORTING it_modules_tbi  TYPE tt_sdk_tla
+                                    it_modules_tbd  TYPE tt_sdk_tla
+                                    i_op            TYPE string
+                                    i_salv_function TYPE syst_ucomm
+                          RETURNING VALUE(r_result) TYPE abap_bool
                           RAISING   lcx_error,
-      check_populated IMPORTING it_modules_tbi    TYPE tt_sdk_tla
-                                it_modules_tbd    TYPE tt_sdk_tla
-                                i_op              TYPE string
-                                i_salv_function   TYPE syst_ucomm
-                                i_tree_controller TYPE REF TO lcl_ui_tree_controller
-                      RETURNING VALUE(r_result)   TYPE abap_bool
+      check_populated IMPORTING it_modules_tbi  TYPE tt_sdk_tla
+                                it_modules_tbd  TYPE tt_sdk_tla
+                                i_op            TYPE string
+                                i_salv_function TYPE syst_ucomm
+                      RETURNING VALUE(r_result) TYPE abap_bool
                       RAISING   lcx_error.
+
+  PROTECTED SECTION.
+  PRIVATE SECTION.
+    CLASS-DATA:
+      tree_controller TYPE REF TO lcl_ui_tree_controller,
+      package_manager TYPE REF TO lcl_sdk_package_manager.
+
+
 ENDCLASS.
 
 CLASS lcl_ui_selection_validator IMPLEMENTATION.
+
+  METHOD class_constructor.
+    package_manager = lcl_sdk_package_manager=>get_instance( i_batch_mode = sy-batch ).
+    tree_controller = lcl_ui_tree_controller=>get_instance( ).
+  ENDMETHOD.
 
 
   METHOD validate_selection.
@@ -3137,20 +3466,17 @@ CLASS lcl_ui_selection_validator IMPLEMENTATION.
     CHECK check_populated( it_modules_tbi  = it_modules_tbi
                                                      it_modules_tbd  = it_modules_tbd
                                                      i_op            = i_op
-                                                     i_salv_function = i_salv_function
-                                                     i_tree_controller = i_tree_controller ).
+                                                     i_salv_function = i_salv_function ).
 
     CHECK check_core_validity( it_modules_tbi  = it_modules_tbi
                                                              it_modules_tbd  = it_modules_tbd
                                                              i_op            = i_op
-                                                             i_salv_function = i_salv_function
-                                                             i_tree_controller = i_tree_controller ).
+                                                             i_salv_function = i_salv_function ).
 
     CHECK check_mod_thresholds( it_modules_tbi = it_modules_tbi
                                 it_modules_tbd = it_modules_tbd
                                 i_op = i_op
-                                i_salv_function = i_salv_function
-                                i_tree_controller = i_tree_controller ).
+                                i_salv_function = i_salv_function ).
 
     r_result = abap_true.
 
@@ -3163,21 +3489,23 @@ CLASS lcl_ui_selection_validator IMPLEMENTATION.
     DATA lv_text TYPE string.
     DATA lv_answer TYPE c.
 
+    DATA(package_manager) = lcl_sdk_package_manager=>get_instance( i_batch_mode = sy-batch ).
+
     CASE i_op.
 
       WHEN 'install'.
         DATA(lv_number_modules_inst) = lines( it_modules_tbi ).
         DATA(lv_number_new_modules) = 0.
-        DATA(lv_number_modules_avail_inst) = lines( i_tree_controller->sdk_package_manager->mt_available_modules_inst ).
+        DATA(lv_number_modules_avail_inst) = lines( package_manager->mt_available_modules_inst ).
 
         " determine modules to be net newly installed
         LOOP AT it_modules_tbi INTO DATA(wa_module_tbi).
-          IF ( wa_module_tbi-tla <> 'core' ) AND NOT line_exists( i_tree_controller->sdk_package_manager->mt_installed_modules[ tla = wa_module_tbi-tla ] ).
+          IF ( wa_module_tbi-tla <> 'core' ) AND NOT line_exists( package_manager->mt_installed_modules[ tla = wa_module_tbi-tla ] ).
             lv_number_new_modules = lv_number_new_modules + 1.
             lv_number_modules_inst = lv_number_modules_inst - 1.
           ENDIF.
 
-          IF ( wa_module_tbi-tla = 'core' ) AND ( NOT i_tree_controller->sdk_package_manager->is_core_installed( ) ).
+          IF ( wa_module_tbi-tla = 'core' ) AND ( NOT package_manager->is_core_installed( ) ).
             lv_number_new_modules = lv_number_new_modules + 1.
             lv_number_modules_inst = lv_number_modules_inst - 1.
           ENDIF.
@@ -3327,15 +3655,15 @@ CLASS lcl_ui_selection_validator IMPLEMENTATION.
 
       WHEN 'install'.
 
-        IF i_tree_controller->sdk_package_manager->is_core_installed( ) = abap_false                            " core is NOT installed
+        IF package_manager->is_core_installed( ) = abap_false                            " core is NOT installed
           AND NOT line_exists( it_modules_tbi[ tla = 'core' ] )  " and NOT selected for installation
           AND lines( it_modules_tbi ) > 0.                              " are other modules selected for installation?
           MESSAGE |Please install core module with first deployment.| TYPE 'S' DISPLAY LIKE 'E' ##NO_TEXT.
           lv_result = abap_false.                                       " then block the request
 
-        ELSEIF i_tree_controller->sdk_package_manager->is_core_installed( ) = abap_true                         " core is installed
+        ELSEIF package_manager->is_core_installed( ) = abap_true                         " core is installed
             AND line_exists( it_modules_tbd[ tla = 'core' ] )    " and marked for deletion
-            AND ( lines( it_modules_tbd ) < lines( i_tree_controller->sdk_package_manager->mt_installed_modules ) - 3    " are any installed modules NOT selected for deletion?
+            AND ( lines( it_modules_tbd ) < lines( package_manager->mt_installed_modules ) - 3    " are any installed modules NOT selected for deletion?
             OR lines( it_modules_tbi ) > 0 ).                                   " or did the user select additional modules for installation?
           MESSAGE |To delete core, additionally mark all installed modules for deletion.| TYPE 'S' DISPLAY LIKE 'E' ##NO_TEXT.
           lv_result = abap_false.                                       " then block the request
@@ -3346,9 +3674,9 @@ CLASS lcl_ui_selection_validator IMPLEMENTATION.
 
       WHEN 'uninstall'.
 
-        IF i_tree_controller->sdk_package_manager->is_core_installed( ) = abap_true                           " core is installed
+        IF package_manager->is_core_installed( ) = abap_true                           " core is installed
             AND line_exists( it_modules_tbd[ tla = 'core' ] )  " and marked for deletion
-            AND ( lines( it_modules_tbd ) < lines( i_tree_controller->sdk_package_manager->mt_installed_modules ) - 3 " are any installed modules NOT selected for deletion?
+            AND ( lines( it_modules_tbd ) < lines( package_manager->mt_installed_modules ) - 3 " are any installed modules NOT selected for deletion?
             OR lines( it_modules_tbi ) > 0 ).                                " or did the user select additional modules for installation?
           MESSAGE |To delete core, additionally mark all installed modules for deletion.| TYPE 'S' DISPLAY LIKE 'E' ##NO_TEXT.
           lv_result = abap_false.                                           " then block the request
@@ -3399,156 +3727,10 @@ ENDCLASS.
 
 
 
-CLASS lcl_ui_utils DEFINITION FINAL.
-  PUBLIC SECTION.
-    CLASS-METHODS:
-      get_running_jobs_message IMPORTING i_job_manager    TYPE REF TO lif_sdk_job_manager
-                               RETURNING VALUE(r_message) TYPE string,
-      display_job_submitted_message IMPORTING i_job_number  TYPE btcjobcnt,
-      confirm_install_all RETURNING VALUE(r_result) TYPE abap_bool RAISING lcx_error,
-      display_job_details_statusbar IMPORTING i_job_manager    TYPE REF TO lif_sdk_job_manager,
-      is_fullscreen IMPORTING i_container     TYPE REF TO cl_gui_container
-                    RETURNING VALUE(r_result) TYPE abap_bool,
-      is_sapgui_html RETURNING VALUE(r_result) TYPE abap_bool,
-      is_sapgui_timeout_sufficient RETURNING VALUE(r_result) TYPE abap_bool
-                                   RAISING   lcx_error.
-ENDCLASS.
-
-CLASS lcl_ui_utils IMPLEMENTATION.
-
-  METHOD display_job_submitted_message.
-    CONCATENATE `Submitted job with number ` i_job_number INTO DATA(job_message) ##NO_TEXT.
-    MESSAGE i000(0k) WITH job_message.
-  ENDMETHOD.
-
-  METHOD get_running_jobs_message.
-
-    DATA: lt_joblist TYPE tbtcjob_tt.
-    lt_joblist = i_job_manager->get_running_jobs( i_jobname = sy-repid ).
-    DATA wa_job TYPE tbtcjob.
-    READ TABLE lt_joblist INTO wa_job INDEX 1.
-    IF sy-subrc <> 0.
-      MESSAGE |Expected to find exactly one job matching { sy-repid } but found { lines( lt_joblist ) }| TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
-    ENDIF.
-    DATA l_job_message TYPE string.
-    CONCATENATE `Import background job currently running with number` wa_job-jobcount INTO r_message SEPARATED BY ' ' ##NO_TEXT.
-
-  ENDMETHOD.
-
-  METHOD confirm_install_all.
-    DATA(lv_text) = |Installing all modules is discouraged and should only be done in demo systems. |
-             && |Continue? | ##NO_TEXT.
-
-    DATA: lv_answer TYPE string.
-
-    CALL FUNCTION 'POPUP_TO_CONFIRM'
-      EXPORTING
-        titlebar              = ' '
-        diagnose_object       = ' '
-        text_question         = lv_text
-        text_button_1         = |Do it anyway|
-        icon_button_1         = ' '
-        text_button_2         = |Go back|
-        icon_button_2         = ' '
-        default_button        = '2'
-        display_cancel_button = ' '
-        userdefined_f1_help   = ' '
-        start_column          = 25
-        start_row             = 6
-        iv_quickinfo_button_1 = ' '
-        iv_quickinfo_button_2 = ' '
-      IMPORTING
-        answer                = lv_answer
-      EXCEPTIONS
-        text_not_found        = 1
-        OTHERS                = 2 ##NO_TEXT.
-    IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
-    ENDIF.
-
-    IF lv_answer = 1.
-      r_result = abap_true.
-    ELSE.
-      r_result = abap_false.
-    ENDIF.
-  ENDMETHOD.
-
-
-  METHOD display_job_details_statusbar.
-
-    " Job already running?
-    IF i_job_manager->is_job_running( ).
-
-      MESSAGE get_running_jobs_message( i_job_manager = i_job_manager ) TYPE 'S' DISPLAY LIKE 'W'.
-
-    ENDIF.
-
-  ENDMETHOD.
-
-  METHOD is_fullscreen.
-
-    DATA lr_gui_container TYPE REF TO cl_gui_container.
-
-    IF i_container IS NOT INITIAL.
-      lr_gui_container = i_container.
-    ELSE.
-      lr_gui_container = CAST #( cl_gui_container=>screen0->children[ 1 ] ).
-    ENDIF.
-
-    IF lr_gui_container->get_name( ) = 'TREE_CONTAINER'.
-      r_result = abap_true.
-    ELSE.
-      r_result = abap_false.
-    ENDIF.
-
-  ENDMETHOD.
-
-  METHOD is_sapgui_html.
-
-    DATA: lv_result TYPE abap_bool VALUE abap_false.
-
-    CALL FUNCTION 'GUI_IS_ITS'
-      IMPORTING
-        return = lv_result.
-
-    r_result = lv_result.
-
-  ENDMETHOD.
-
-  METHOD is_sapgui_timeout_sufficient.
-
-    DATA: lv_gui_auto_timeout TYPE spfpflpar-pvalue VALUE '0'.
-    DATA: lv_result TYPE abap_bool VALUE abap_false.
-
-    CALL FUNCTION 'RSAN_SYSTEM_PARAMETER_READ'
-      EXPORTING
-        i_name     = 'rdisp/gui_auto_logout'
-      IMPORTING
-        e_value    = lv_gui_auto_timeout
-      EXCEPTIONS
-        read_error = 1
-        OTHERS     = 2.
-    IF sy-subrc <> 0.
-      RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
-    ENDIF.
-
-    IF lv_gui_auto_timeout > lif_ui_constants=>c_sapgui_autologout_threshold.
-      lv_result = abap_true.
-    ENDIF.
-
-    r_result = lv_result.
-
-  ENDMETHOD.
-ENDCLASS.
-
-
-
 INTERFACE lif_ui_command.
   METHODS:
-    execute IMPORTING i_tree_controller TYPE REF TO lcl_ui_tree_controller
-            RAISING   lcx_error,
-    can_execute IMPORTING i_tree_controller TYPE REF TO lcl_ui_tree_controller
-                RETURNING VALUE(r_result)   TYPE abap_bool
+    execute RAISING   lcx_error,
+    can_execute RETURNING VALUE(r_result) TYPE abap_bool
                 RAISING   lcx_error.
 ENDINTERFACE.
 
@@ -3559,23 +3741,68 @@ CLASS lcl_ui_command_base DEFINITION ABSTRACT.
       lif_ui_command.
 
     METHODS:
-      constructor IMPORTING i_tree_controller TYPE REF TO lcl_ui_tree_controller.
+      constructor IMPORTING i_tree_controller       TYPE REF TO lcl_ui_tree_controller OPTIONAL
+                            i_package_manager       TYPE REF TO lcl_sdk_package_manager OPTIONAL
+                            i_internet_manager      TYPE REF TO lif_sdk_internet_manager OPTIONAL
+                            i_certificate_manager   TYPE REF TO lif_sdk_certificate_manager OPTIONAL
+                            i_job_manager           TYPE REF TO lif_sdk_job_manager OPTIONAL
+                            i_report_update_manager TYPE REF TO lif_sdk_report_update_manager OPTIONAL.
 
 
   PROTECTED SECTION.
     DATA:
-      tree_controller TYPE REF TO lcl_ui_tree_controller,
-      target_version  TYPE string.
+      tree_controller       TYPE REF TO lcl_ui_tree_controller,
+      package_manager       TYPE REF TO lcl_sdk_package_manager,
+      internet_manager      TYPE REF TO lif_sdk_internet_manager,
+      certificate_manager   TYPE REF TO lif_sdk_certificate_manager,
+      job_manager           TYPE REF TO lif_sdk_job_manager,
+      report_update_manager TYPE REF TO lif_sdk_report_update_manager,
+      target_version        TYPE string.
 
     METHODS:
       get_target_version RETURNING VALUE(r_version)  TYPE string.
+
 ENDCLASS.
 
 
 CLASS lcl_ui_command_base IMPLEMENTATION.
 
   METHOD constructor.
-    tree_controller = i_tree_controller.
+    IF i_tree_controller IS BOUND.
+      tree_controller = i_tree_controller.
+    ELSE.
+      tree_controller = lcl_ui_tree_controller=>get_instance( ).
+    ENDIF.
+
+    IF i_package_manager IS BOUND.
+      package_manager = i_package_manager.
+    ELSE.
+      package_manager = lcl_sdk_package_manager=>get_instance( i_batch_mode = sy-batch ).
+    ENDIF.
+
+    IF i_internet_manager IS BOUND.
+      internet_manager = i_internet_manager.
+    ELSE.
+      internet_manager = lcl_sdk_internet_manager=>get_instance( ).
+    ENDIF.
+
+    IF i_certificate_manager IS BOUND.
+      certificate_manager = i_certificate_manager.
+    ELSE.
+      certificate_manager = lcl_sdk_certificate_manager=>get_instance( ).
+    ENDIF.
+
+    IF i_job_manager IS BOUND.
+      job_manager = i_job_manager.
+    ELSE.
+      job_manager = lcl_sdk_job_manager=>get_instance( ).
+    ENDIF.
+
+    IF i_report_update_manager IS BOUND.
+      report_update_manager = i_report_update_manager.
+    ELSE.
+      report_update_manager = lcl_sdk_report_update_manager=>get_instance( ).
+    ENDIF.
   ENDMETHOD.
 
   METHOD lif_ui_command~execute.
@@ -3594,9 +3821,9 @@ CLASS lcl_ui_command_base IMPLEMENTATION.
     ENDIF.
     " we only use the same version as core (given it is installed at all)
     " if the installed version of core is NOT the latest version
-    IF tree_controller->sdk_package_manager->is_core_installed( ) = abap_true.
-      IF NOT tree_controller->sdk_package_manager->is_version_latest( tree_controller->sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-cvers ).
-        target_version = tree_controller->sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-cvers.
+    IF package_manager->is_core_installed( ) = abap_true.
+      IF NOT package_manager->is_version_latest( package_manager->mt_installed_modules[ tla = 'sts' ]-cvers ).
+        target_version = package_manager->mt_installed_modules[ tla = 'sts' ]-cvers.
       ELSE.
         target_version = 'LATEST'.
       ENDIF.
@@ -3622,9 +3849,9 @@ ENDCLASS.
 
 CLASS lcl_ui_command_exe_dia IMPLEMENTATION.
   METHOD lif_ui_command~execute.
-    tree_controller->sdk_package_manager->run_foreground( i_modules_to_be_installed = tree_controller->mt_modules_to_be_installed
-                                                          i_modules_to_be_deleted   = tree_controller->mt_modules_to_be_deleted
-                                                          i_target_version          = get_target_version( ) ).
+    package_manager->run_foreground( i_modules_to_be_installed = tree_controller->mt_modules_to_be_installed
+                                     i_modules_to_be_deleted   = tree_controller->mt_modules_to_be_deleted
+                                     i_target_version          = get_target_version( ) ).
     tree_controller->refresh( ).
   ENDMETHOD.
 
@@ -3639,14 +3866,13 @@ CLASS lcl_ui_command_exe_dia IMPLEMENTATION.
     CHECK lcl_ui_selection_validator=>validate_selection( it_modules_tbi = tree_controller->mt_modules_to_be_installed
                                it_modules_tbd = tree_controller->mt_modules_to_be_deleted
                                i_salv_function = 'EXE_FGND'
-                               i_op = 'install'
-                               i_tree_controller = i_tree_controller ).
+                               i_op = 'install' ).
     CHECK lines( tree_controller->mt_modules_to_be_installed ) > 0
       OR lines( tree_controller->mt_modules_to_be_deleted ) > 0
       OR lines( tree_controller->mt_modules_to_be_updated ) > 0.
-    CHECK tree_controller->sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
-    CHECK tree_controller->sdk_package_manager->update_zipfiles_if_outdated( i_avers_core_inst = tree_controller->sdk_package_manager->mt_available_modules_inst[ tla = 'core' ]-avers
-                            i_avers_core_uninst = tree_controller->sdk_package_manager->mt_available_modules_uninst[ tla = 'core' ]-avers ).
+    CHECK package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
+    CHECK package_manager->update_zipfiles_if_outdated( i_avers_core_inst = package_manager->mt_available_modules_inst[ tla = 'core' ]-avers
+                            i_avers_core_uninst = package_manager->mt_available_modules_uninst[ tla = 'core' ]-avers ).
     r_result = abap_true.
   ENDMETHOD.
 
@@ -3668,10 +3894,9 @@ ENDCLASS.
 
 CLASS lcl_ui_command_exe_btc IMPLEMENTATION.
   METHOD lif_ui_command~execute.
-    DATA(job_manager) = tree_controller->sdk_package_manager->job_manager.
-    DATA(job_number) = tree_controller->sdk_package_manager->job_manager->submit_batch_job( i_modules_to_be_installed = tree_controller->mt_modules_to_be_installed
-                                                                                            i_modules_to_be_deleted   = tree_controller->mt_modules_to_be_deleted
-                                                                                            i_target_version          = get_target_version( ) ).
+    DATA(job_number) = job_manager->submit_batch_job( i_modules_to_be_installed = tree_controller->mt_modules_to_be_installed
+                                                      i_modules_to_be_deleted   = tree_controller->mt_modules_to_be_deleted
+                                                      i_target_version          = get_target_version( ) ).
     lcl_ui_utils=>display_job_submitted_message( i_job_number = job_number ).
     tree_controller->refresh( ).
   ENDMETHOD.
@@ -3687,14 +3912,13 @@ CLASS lcl_ui_command_exe_btc IMPLEMENTATION.
     CHECK lcl_ui_selection_validator=>validate_selection( it_modules_tbi = tree_controller->mt_modules_to_be_installed
                                it_modules_tbd = tree_controller->mt_modules_to_be_deleted
                                i_salv_function = 'EXE_BGND'
-                               i_op = 'install'
-                               i_tree_controller = i_tree_controller ).
+                               i_op = 'install' ).
     CHECK lines( tree_controller->mt_modules_to_be_installed ) > 0
       OR lines( tree_controller->mt_modules_to_be_deleted ) > 0
       OR lines( tree_controller->mt_modules_to_be_updated ) > 0.
-    CHECK tree_controller->sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
-    CHECK tree_controller->sdk_package_manager->update_zipfiles_if_outdated( i_avers_core_inst = tree_controller->sdk_package_manager->mt_available_modules_inst[ tla = 'core' ]-avers
-                            i_avers_core_uninst = tree_controller->sdk_package_manager->mt_available_modules_uninst[ tla = 'core' ]-avers ).
+    CHECK package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
+    CHECK package_manager->update_zipfiles_if_outdated( i_avers_core_inst = package_manager->mt_available_modules_inst[ tla = 'core' ]-avers
+                            i_avers_core_uninst = package_manager->mt_available_modules_uninst[ tla = 'core' ]-avers ).
     r_result = abap_true.
   ENDMETHOD.
 
@@ -3713,9 +3937,9 @@ ENDCLASS.
 
 CLASS lcl_ui_command_ins_dia IMPLEMENTATION.
   METHOD lif_ui_command~execute.
-    tree_controller->sdk_package_manager->run_foreground( i_modules_to_be_installed = tree_controller->mt_modules_to_be_installed
-                                                          i_modules_to_be_deleted   = tree_controller->mt_modules_to_be_deleted
-                                                          i_target_version          = get_target_version( ) ). " empty since modules tbd are not collected here
+    package_manager->run_foreground( i_modules_to_be_installed = tree_controller->mt_modules_to_be_installed
+                                     i_modules_to_be_deleted   = tree_controller->mt_modules_to_be_deleted
+                                     i_target_version          = get_target_version( ) ). " empty since modules tbd are not collected here
     tree_controller->refresh( ).
   ENDMETHOD.
   METHOD lif_ui_command~can_execute.
@@ -3725,10 +3949,9 @@ CLASS lcl_ui_command_ins_dia IMPLEMENTATION.
     CHECK lcl_ui_selection_validator=>validate_selection( it_modules_tbi = tree_controller->mt_modules_to_be_installed
                                it_modules_tbd = tree_controller->mt_modules_to_be_deleted
                                i_salv_function = 'INS_FGND'
-                               i_op = 'install'
-                               i_tree_controller = tree_controller ) = abap_false.
+                               i_op = 'install' ) = abap_false.
     CHECK lines( tree_controller->mt_modules_to_be_installed ) > 0.
-    CHECK tree_controller->sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
+    CHECK package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
     r_result = abap_true.
   ENDMETHOD.
 ENDCLASS.
@@ -3744,10 +3967,9 @@ ENDCLASS.
 
 CLASS lcl_ui_command_ins_btc IMPLEMENTATION.
   METHOD lif_ui_command~execute.
-    DATA(job_manager) = tree_controller->sdk_package_manager->job_manager.
-    DATA(job_number) = tree_controller->sdk_package_manager->job_manager->submit_batch_job( i_modules_to_be_installed = tree_controller->mt_modules_to_be_installed
-                                                                                            i_modules_to_be_deleted   = tree_controller->mt_modules_to_be_deleted
-                                                                                            i_target_version          = get_target_version( ) ). " empty since modules tbd are not collected here
+    DATA(job_number) = job_manager->submit_batch_job( i_modules_to_be_installed = tree_controller->mt_modules_to_be_installed
+                                                      i_modules_to_be_deleted   = tree_controller->mt_modules_to_be_deleted
+                                                      i_target_version          = get_target_version( ) ). " empty since modules tbd are not collected here
     lcl_ui_utils=>display_job_submitted_message( i_job_number = job_number ).
     tree_controller->refresh( ).
   ENDMETHOD.
@@ -3758,10 +3980,9 @@ CLASS lcl_ui_command_ins_btc IMPLEMENTATION.
     CHECK lcl_ui_selection_validator=>validate_selection( it_modules_tbi = tree_controller->mt_modules_to_be_installed
                                it_modules_tbd = tree_controller->mt_modules_to_be_deleted
                                i_salv_function = 'INS_BGND'
-                               i_op = 'install'
-                               i_tree_controller = tree_controller ) = abap_false.
+                               i_op = 'install' ) = abap_false.
     CHECK lines( tree_controller->mt_modules_to_be_installed ) > 0.
-    CHECK tree_controller->sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
+    CHECK package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
     r_result = abap_true.
   ENDMETHOD.
 ENDCLASS.
@@ -3777,11 +3998,12 @@ ENDCLASS.
 
 CLASS lcl_ui_command_del_dia IMPLEMENTATION.
   METHOD lif_ui_command~execute.
-    tree_controller->sdk_package_manager->run_foreground( i_modules_to_be_installed = tree_controller->mt_modules_to_be_installed " empty since modules tbi are not collected here
-                                                          i_modules_to_be_deleted   = tree_controller->mt_modules_to_be_deleted
-                                                          i_target_version          = get_target_version( ) ).
+    package_manager->run_foreground( i_modules_to_be_installed = tree_controller->mt_modules_to_be_installed " empty since modules tbi are not collected here
+                                     i_modules_to_be_deleted   = tree_controller->mt_modules_to_be_deleted
+                                     i_target_version          = get_target_version( ) ).
     tree_controller->refresh( ).
   ENDMETHOD.
+
   METHOD lif_ui_command~can_execute.
     CLEAR: tree_controller->mt_modules_to_be_installed.
     CLEAR: tree_controller->mt_modules_to_be_deleted.
@@ -3791,10 +4013,9 @@ CLASS lcl_ui_command_del_dia IMPLEMENTATION.
     CHECK lcl_ui_selection_validator=>validate_selection( it_modules_tbi = tree_controller->mt_modules_to_be_installed
                                it_modules_tbd = tree_controller->mt_modules_to_be_deleted
                                i_salv_function = 'DEL_FGND'
-                               i_op = 'uninstall'
-                               i_tree_controller = tree_controller ).
+                               i_op = 'uninstall' ).
     CHECK lines( tree_controller->mt_modules_to_be_deleted ) > 0.
-    CHECK tree_controller->sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
+    CHECK package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
     r_result = abap_true.
   ENDMETHOD.
 ENDCLASS.
@@ -3809,9 +4030,7 @@ ENDCLASS.
 
 
 CLASS lcl_ui_command_del_btc IMPLEMENTATION.
-
   METHOD lif_ui_command~execute.
-    DATA(job_manager) = tree_controller->sdk_package_manager->job_manager.
     DATA(job_number) = job_manager->submit_batch_job( i_modules_to_be_installed = tree_controller->mt_modules_to_be_installed " empty since modules tbi are not collected here
                                                       i_modules_to_be_deleted   = tree_controller->mt_modules_to_be_deleted
                                                       i_target_version          = get_target_version( ) ).
@@ -3826,10 +4045,9 @@ CLASS lcl_ui_command_del_btc IMPLEMENTATION.
     CHECK lcl_ui_selection_validator=>validate_selection( it_modules_tbi = tree_controller->mt_modules_to_be_installed
                                                        it_modules_tbd = tree_controller->mt_modules_to_be_deleted
                                                        i_salv_function = 'DEL_BGND'
-                                                       i_op = 'uninstall'
-                                                       i_tree_controller = tree_controller ).
+                                                       i_op = 'uninstall' ).
     CHECK lines( tree_controller->mt_modules_to_be_deleted ) > 0.
-    CHECK tree_controller->sdk_package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
+    CHECK package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
     r_result = abap_true.
   ENDMETHOD.
 ENDCLASS.
@@ -3842,13 +4060,14 @@ CLASS lcl_ui_command_ref_ctl DEFINITION INHERITING FROM lcl_ui_command_base FINA
       lif_ui_command~can_execute REDEFINITION.
 ENDCLASS.
 
+
 CLASS lcl_ui_command_ref_ctl IMPLEMENTATION.
   METHOD lif_ui_command~execute.
     tree_controller->refresh( ).
   ENDMETHOD.
 
   METHOD lif_ui_command~can_execute.
-    r_result = super->lif_ui_command~can_execute( i_tree_controller = i_tree_controller ).
+    r_result = super->lif_ui_command~can_execute( ).
   ENDMETHOD.
 ENDCLASS.
 
@@ -3860,13 +4079,14 @@ CLASS lcl_ui_command_btc_dtl DEFINITION INHERITING FROM lcl_ui_command_base FINA
       lif_ui_command~can_execute REDEFINITION.
 ENDCLASS.
 
+
 CLASS lcl_ui_command_btc_dtl IMPLEMENTATION.
   METHOD lif_ui_command~execute.
-    MESSAGE lcl_ui_utils=>get_running_jobs_message( i_job_manager = i_tree_controller->sdk_package_manager->job_manager ) TYPE 'I'.
+    MESSAGE lcl_ui_utils=>get_running_jobs_message( ) TYPE 'I'.
   ENDMETHOD.
 
   METHOD lif_ui_command~can_execute.
-    IF tree_controller->sdk_package_manager->job_manager->is_job_running( ).
+    IF job_manager->is_job_running( ).
       r_result = abap_true.
     ELSE.
       MESSAGE 'No background job currently running.' TYPE 'I' ##NO_TEXT.
@@ -3884,11 +4104,11 @@ ENDCLASS.
 
 CLASS lcl_ui_command_upd_ins IMPLEMENTATION.
   METHOD lif_ui_command~execute.
-    i_tree_controller->toggle_inst_modules( i_checked = abap_true ).
+    tree_controller->toggle_inst_modules( i_checked = abap_true ).
   ENDMETHOD.
 
   METHOD lif_ui_command~can_execute.
-    r_result = super->lif_ui_command~can_execute( i_tree_controller = i_tree_controller ).
+    r_result = super->lif_ui_command~can_execute( ).
   ENDMETHOD.
 ENDCLASS.
 
@@ -3902,11 +4122,11 @@ ENDCLASS.
 
 CLASS lcl_ui_command_des_ins IMPLEMENTATION.
   METHOD lif_ui_command~execute.
-    i_tree_controller->toggle_inst_modules( i_checked = abap_false ).
+    tree_controller->toggle_inst_modules( i_checked = abap_false ).
   ENDMETHOD.
 
   METHOD lif_ui_command~can_execute.
-    r_result = super->lif_ui_command~can_execute( i_tree_controller = i_tree_controller ).
+    r_result = super->lif_ui_command~can_execute( ).
   ENDMETHOD.
 ENDCLASS.
 
@@ -3920,10 +4140,10 @@ ENDCLASS.
 
 CLASS lcl_ui_command_ins_all IMPLEMENTATION.
   METHOD lif_ui_command~execute.
-    DATA(job_number) = i_tree_controller->sdk_package_manager->install_all_modules( it_modules_to_be_installed = i_tree_controller->mt_modules_to_be_installed
-                                                                                    it_modules_to_be_deleted   = i_tree_controller->mt_modules_to_be_deleted ).
+    DATA(job_number) = package_manager->install_all_modules( it_modules_to_be_installed = tree_controller->mt_modules_to_be_installed
+                                                             it_modules_to_be_deleted   = tree_controller->mt_modules_to_be_deleted ).
     lcl_ui_utils=>display_job_submitted_message( i_job_number = job_number ).
-    i_tree_controller->refresh( ).
+    tree_controller->refresh( ).
   ENDMETHOD.
 
   METHOD lif_ui_command~can_execute.
@@ -3942,14 +4162,14 @@ ENDCLASS.
 CLASS lcl_ui_command_chk_upd IMPLEMENTATION.
 
   METHOD lif_ui_command~execute.
-    DATA(update_available) = tree_controller->sdk_package_manager->report_update_manager->is_update_available( ).
-    DATA(available_version) = tree_controller->sdk_package_manager->report_update_manager->get_available_version( ).
-    DATA(current_version) = tree_controller->sdk_package_manager->report_update_manager->get_current_version( ).
+    DATA(update_available) = report_update_manager->is_update_available( ).
+    DATA(available_version) = report_update_manager->get_available_version( ).
+    DATA(current_version) = report_update_manager->get_current_version( ).
 
     IF update_available = abap_true.
 
       DATA lv_text TYPE string.
-      lv_text = |An updated version of the report is available! Download now?| ##NO_TEXT.
+      lv_text = |An updated version of the report is available!| ##NO_TEXT.
 
       DATA lv_answer TYPE c.
 
@@ -3958,9 +4178,9 @@ CLASS lcl_ui_command_chk_upd IMPLEMENTATION.
           titlebar              = ' '
           diagnose_object       = ' '
           text_question         = lv_text
-          text_button_1         = |Yes|
+          text_button_1         = |Download now|
           icon_button_1         = ' '
-          text_button_2         = |Not now|
+          text_button_2         = |Not yet|
           icon_button_2         = ' '
           default_button        = '1'
           display_cancel_button = ' '
@@ -3979,7 +4199,7 @@ CLASS lcl_ui_command_chk_upd IMPLEMENTATION.
       ENDIF.
 
       IF lv_answer = 1.
-        tree_controller->sdk_package_manager->report_update_manager->update_report( ).
+        report_update_manager->update_report( ).
         MESSAGE |Report updated successfully. Please restart the report for changes to take effect! If you are starting the report from SE80 or SE38, please restart the transaction as well!| TYPE 'I'.
       ENDIF.
 
@@ -3990,7 +4210,7 @@ CLASS lcl_ui_command_chk_upd IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD lif_ui_command~can_execute.
-    r_result = tree_controller->sdk_package_manager->internet_manager->has_internet_access( ).
+    r_result = internet_manager->has_internet_access( ).
   ENDMETHOD.
 ENDCLASS.
 
@@ -4005,11 +4225,11 @@ ENDCLASS.
 
 CLASS lcl_ui_command_dow_crt IMPLEMENTATION.
   METHOD lif_ui_command~execute.
-    i_tree_controller->sdk_package_manager->certificate_manager->install_amazon_root_certs( ).
+    certificate_manager->install_amazon_root_certs( ).
   ENDMETHOD.
 
   METHOD lif_ui_command~can_execute.
-    r_result = i_tree_controller->sdk_package_manager->internet_manager->has_internet_access( ).
+    r_result = internet_manager->has_internet_access( ).
   ENDMETHOD.
 ENDCLASS.
 
@@ -4023,11 +4243,11 @@ ENDCLASS.
 
 CLASS lcl_ui_command_dow_trk IMPLEMENTATION.
   METHOD lif_ui_command~execute.
-    i_tree_controller->sdk_package_manager->sdk_zipfiles->download_zipfile_pair( i_version = 'LATEST' ).
+    package_manager->sdk_zipfiles->download_zipfile_pair( i_version = 'LATEST' ).
   ENDMETHOD.
 
   METHOD lif_ui_command~can_execute.
-    r_result = i_tree_controller->sdk_package_manager->internet_manager->has_internet_access( ).
+    r_result = internet_manager->has_internet_access( ).
   ENDMETHOD.
 ENDCLASS.
 
@@ -4035,9 +4255,8 @@ ENDCLASS.
 CLASS lcl_ui_command_factory DEFINITION FINAL.
   PUBLIC SECTION.
     CLASS-METHODS:
-      create_command IMPORTING i_function_code   TYPE syst_ucomm
-                               i_tree_controller TYPE REF TO lcl_ui_tree_controller
-                     RETURNING VALUE(r_command)  TYPE REF TO lif_ui_command
+      create_command IMPORTING i_function_code  TYPE syst_ucomm
+                     RETURNING VALUE(r_command) TYPE REF TO lif_ui_command
                      RAISING   lcx_error.
 ENDCLASS.
 
@@ -4046,33 +4265,33 @@ CLASS lcl_ui_command_factory IMPLEMENTATION.
 
     CASE i_function_code.
       WHEN 'STRT' OR 'EXE_FGND'.
-        r_command = NEW lcl_ui_command_exe_dia( i_tree_controller = i_tree_controller ).
+        r_command = NEW lcl_ui_command_exe_dia( ).
       WHEN 'BTCH' OR 'EXE_BGND'.
-        r_command = NEW lcl_ui_command_exe_btc( i_tree_controller = i_tree_controller ).
+        r_command = NEW lcl_ui_command_exe_btc( ).
       WHEN 'INS_FGND'.
-        r_command = NEW lcl_ui_command_ins_dia( i_tree_controller = i_tree_controller ).
+        r_command = NEW lcl_ui_command_ins_dia( ).
       WHEN 'INS_BGND'.
-        r_command = NEW lcl_ui_command_ins_btc( i_tree_controller = i_tree_controller ).
+        r_command = NEW lcl_ui_command_ins_btc( ).
       WHEN 'DEL_FGND'.
-        r_command = NEW lcl_ui_command_del_dia( i_tree_controller = i_tree_controller ).
+        r_command = NEW lcl_ui_command_del_dia( ).
       WHEN 'DEL_BGND'.
-        r_command = NEW lcl_ui_command_del_btc( i_tree_controller = i_tree_controller ).
+        r_command = NEW lcl_ui_command_del_btc( ).
       WHEN 'UPD_INST'.
-        r_command = NEW lcl_ui_command_upd_ins( i_tree_controller = i_tree_controller ).
+        r_command = NEW lcl_ui_command_upd_ins( ).
       WHEN 'DES_INST'.
-        r_command = NEW lcl_ui_command_des_ins( i_tree_controller = i_tree_controller ).
+        r_command = NEW lcl_ui_command_des_ins( ).
       WHEN 'REF_TREE'.
-        r_command = NEW lcl_ui_command_ref_ctl( i_tree_controller = i_tree_controller ).
+        r_command = NEW lcl_ui_command_ref_ctl( ).
       WHEN 'BTC_DTLS'.
-        r_command = NEW lcl_ui_command_btc_dtl( i_tree_controller = i_tree_controller ).
+        r_command = NEW lcl_ui_command_btc_dtl( ).
       WHEN 'CHK_UPDT'.
-        r_command = NEW lcl_ui_command_chk_upd( i_tree_controller = i_tree_controller ).
+        r_command = NEW lcl_ui_command_chk_upd( ).
       WHEN 'DOW_CERT'.
-        r_command = NEW lcl_ui_command_dow_crt( i_tree_controller = i_tree_controller ).
+        r_command = NEW lcl_ui_command_dow_crt( ).
       WHEN 'DOW_TRAK'.
-        r_command = NEW lcl_ui_command_dow_trk( i_tree_controller = i_tree_controller ).
+        r_command = NEW lcl_ui_command_dow_trk( ).
       WHEN 'INS_ALL'.
-        r_command = NEW lcl_ui_command_ins_all( i_tree_controller =  i_tree_controller ).
+        r_command = NEW lcl_ui_command_ins_all( ).
       WHEN OTHERS.
         RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Unkown function code { i_function_code }| ##NO_TEXT..
     ENDCASE.
@@ -4081,30 +4300,27 @@ CLASS lcl_ui_command_factory IMPLEMENTATION.
 ENDCLASS.
 
 
-
-
-
 CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
   METHOD constructor.
 
-    IF i_sdk_package_manager IS BOUND.
-      sdk_package_manager = i_sdk_package_manager.
+    IF i_package_manager IS BOUND.
+      package_manager = i_package_manager.
     ELSE.
-      sdk_package_manager = NEW lcl_sdk_package_manager( ).
+      package_manager = lcl_sdk_package_manager=>get_instance( i_batch_mode = sy-batch ).
     ENDIF.
 
+    IF i_job_manager IS BOUND.
+      job_manager = i_job_manager.
+    ELSE.
+      job_manager = lcl_sdk_job_manager=>get_instance( ).
+    ENDIF.
 
-    "mt_installed_modules = sdk_package_manager->get_sdk_installed_modules( ).
-    "
-    "mt_available_modules_inst = sdk_package_manager->get_sdk_avail_modules_json( i_operation = 'install'
-    "                                                                                i_source    = 'web'
-    "                                                                               i_version   = 'LATEST' ).
-    "mt_available_modules_uninst = sdk_package_manager->get_sdk_avail_modules_json( i_operation = 'uninstall'
-    "                                                                                  i_source    = 'web'
-    "                                                                                  i_version   = 'LATEST' ).
+  ENDMETHOD.
 
-    SELECT tla FROM @sdk_package_manager->mt_available_modules_inst AS am WHERE is_popular = 'X' INTO TABLE @mt_popular_modules .
+  " WARNING: THIS NEEDS TO STAY SEPARATE FROM THE CONSTRUCTOR OR THE FM CALL IN CREATE_CONTAINER BREAKS THE SINGLETON
+  METHOD init.
+    SELECT tla FROM @package_manager->mt_available_modules_inst AS am WHERE is_popular = 'X' INTO TABLE @mt_popular_modules .
 
     " re-hydrate the module staging area if report is restarted
     IMPORT st_modules_to_be_installed = mt_modules_to_be_installed FROM SHARED BUFFER indx(mi) ID 'MOD_INST'.
@@ -4116,7 +4332,19 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
     ELSE.
       create_fullscreen( ).
     ENDIF.
+  ENDMETHOD.
 
+
+  METHOD get_instance.
+    IF tree_controller IS NOT BOUND.
+      TRY.
+          tree_controller = NEW lcl_ui_tree_controller( ).
+        CATCH lcx_error INTO DATA(ex).
+          ex->show( ).
+      ENDTRY.
+    ENDIF.
+
+    r_tree_controller = tree_controller.
   ENDMETHOD.
 
 
@@ -4313,26 +4541,26 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
                    ir_node_key  = lr_key ).
 
     DATA wa_core_module TYPE ts_sdk_module.
-    READ TABLE sdk_package_manager->mt_installed_modules WITH KEY tla = 'sts' INTO wa_core_module. " core module installed?
+    READ TABLE package_manager->mt_installed_modules WITH KEY tla = 'sts' INTO wa_core_module. " core module installed?
     IF sy-subrc <> 0.
 
     ENDIF.
 
     wa_core_module-tla = 'core'.
     wa_core_module-name = 'AWS SDK for SAP ABAP core [s3, smr, rla, sts]' ##NO_TEXT.
-    wa_core_module-avers = sdk_package_manager->mt_available_modules_inst[ tla = 'core' ]-avers.
-    wa_core_module-atransport = sdk_package_manager->mt_available_modules_inst[ tla = 'core' ]-atransport.
+    wa_core_module-avers = package_manager->mt_available_modules_inst[ tla = 'core' ]-avers.
+    wa_core_module-atransport = package_manager->mt_available_modules_inst[ tla = 'core' ]-atransport.
 
 
 
     IF wa_core_module-cvers IS NOT INITIAL.
 
-      IF lcl_sdk_utils=>cmp_version_string( i_string1 = sdk_package_manager->mt_available_modules_inst[ tla = 'core' ]-avers
+      IF lcl_sdk_utils=>cmp_version_string( i_string1 = package_manager->mt_available_modules_inst[ tla = 'core' ]-avers
                                                     i_string2 = wa_core_module-cvers ) = 0.
         wa_core_module-op_icon = '@08@'.
         wa_core_module-op_text = 'Module up to date, no operation planned.' ##NO_TEXT.
         wa_core_module-op_code = lif_ui_constants=>c_operation_none.
-      ELSEIF lcl_sdk_utils=>cmp_version_string( i_string1 = sdk_package_manager->mt_available_modules_inst[ tla = 'core' ]-avers
+      ELSEIF lcl_sdk_utils=>cmp_version_string( i_string1 = package_manager->mt_available_modules_inst[ tla = 'core' ]-avers
                                                         i_string2 = wa_core_module-cvers ) = 1.
         wa_core_module-op_icon = '@09@'.
         wa_core_module-op_text = 'Module will be updated.' ##NO_TEXT.
@@ -4362,11 +4590,11 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
       " is_core_installed( ) does not always work here as not all 4 core modules might
       " be fully present yet during an installation run
-      IF sdk_package_manager->is_core_installed( ) = abap_false
+      IF package_manager->is_core_installed( ) = abap_false
        OR wa_core_module-cvers IS NOT INITIAL
        AND line_exists( mt_modules_to_be_installed[ tla = 'core' ] ).
         wa_core_module-op_text = 'Installation operation in progress.' ##NO_TEXT.
-      ELSEIF sdk_package_manager->is_core_installed( ) = abap_true
+      ELSEIF package_manager->is_core_installed( ) = abap_true
         OR wa_core_module-cvers IS INITIAL
         AND line_exists( mt_modules_to_be_deleted[ tla = 'core' ] ).
         wa_core_module-op_text = 'Delete operation in progress.' ##NO_TEXT.
@@ -4407,16 +4635,16 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 *      lr_item->set_editable( abap_true ).
 *    ENDIF.
 
-    IF sdk_package_manager->is_core_installed( ) = abap_true  " core installed and should be updated
+    IF package_manager->is_core_installed( ) = abap_true  " core installed and should be updated
      AND line_exists( mt_modules_to_be_installed[ tla = 'core' ] ).
       lr_item->set_checked( abap_true ).
-    ELSEIF sdk_package_manager->is_core_installed( ) = abap_true  " core installed and should be deleted
+    ELSEIF package_manager->is_core_installed( ) = abap_true  " core installed and should be deleted
       AND line_exists( mt_modules_to_be_deleted[ tla = 'core' ] ).
       lr_item->set_checked( abap_false ).
-    ELSEIF sdk_package_manager->is_core_installed( ) = abap_true   " core installed and should NOT be updated
+    ELSEIF package_manager->is_core_installed( ) = abap_true   " core installed and should NOT be updated
       AND NOT line_exists( mt_modules_to_be_installed[ tla = 'core' ] ).
       lr_item->set_checked( abap_true ).
-    ELSEIF NOT sdk_package_manager->is_core_installed( ) = abap_true   " core NOT installed and should be installed
+    ELSEIF NOT package_manager->is_core_installed( ) = abap_true   " core NOT installed and should be installed
       AND line_exists( mt_modules_to_be_installed[ tla = 'core' ] ).
       lr_item->set_checked( abap_true ).
     ELSE.
@@ -4424,7 +4652,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
     ENDIF.
 
 
-    IF sdk_package_manager->job_manager->is_job_running( ).
+    IF job_manager->is_job_running( ).
       lr_item->set_editable( abap_false ).
     ENDIF.
 
@@ -4443,7 +4671,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
     lr_nodes = mr_tree->get_nodes( ).
 
     " TODO: returning the no of modules (installed, available) should go into a dedicated function.
-    DATA(l_inst_mod_no) = lines( sdk_package_manager->mt_installed_modules ).
+    DATA(l_inst_mod_no) = lines( package_manager->mt_installed_modules ).
     IF l_inst_mod_no >= 4.
       l_inst_mod_no = l_inst_mod_no - 3.
     ENDIF.
@@ -4464,7 +4692,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
 
 
-    IF lines( sdk_package_manager->mt_installed_modules ) > 0.
+    IF lines( package_manager->mt_installed_modules ) > 0.
       TRY.
           lr_node->expand( ).
         CATCH cx_salv_msg.
@@ -4483,14 +4711,14 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
 
 
-    SORT sdk_package_manager->mt_installed_modules BY tla.
+    SORT package_manager->mt_installed_modules BY tla.
 
     DATA wa_installed_module TYPE ts_sdk_module.
 
-    LOOP AT sdk_package_manager->mt_installed_modules INTO wa_installed_module.
+    LOOP AT package_manager->mt_installed_modules INTO wa_installed_module.
 
       " Skip modules that are part of AWS_CORE
-      IF sdk_package_manager->is_module_core( wa_installed_module-tla ).
+      IF package_manager->is_module_core( wa_installed_module-tla ).
 
         CONTINUE.
 
@@ -4498,8 +4726,8 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
 
 
-        wa_installed_module-avers = VALUE #( sdk_package_manager->mt_available_modules_inst[ tla = wa_installed_module-tla ]-avers DEFAULT 'n.a.' ).
-        wa_installed_module-atransport = VALUE #( sdk_package_manager->mt_available_modules_inst[ tla = wa_installed_module-tla ]-atransport DEFAULT 'n.a.' ).
+        wa_installed_module-avers = VALUE #( package_manager->mt_available_modules_inst[ tla = wa_installed_module-tla ]-avers DEFAULT 'n.a.' ).
+        wa_installed_module-atransport = VALUE #( package_manager->mt_available_modules_inst[ tla = wa_installed_module-tla ]-atransport DEFAULT 'n.a.' ).
 
         l_text = wa_installed_module-tla.
 
@@ -4566,7 +4794,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
 
 
-        IF sdk_package_manager->job_manager->is_job_running( ).
+        IF job_manager->is_job_running( ).
           lr_item->set_editable( abap_false ).
         ELSE.
           lr_item->set_editable( abap_true ).
@@ -4594,14 +4822,14 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
     lr_nodes = mr_tree->get_nodes( ).
 
-    DATA(l_inst_mod_no) = lines( sdk_package_manager->mt_installed_modules ).
+    DATA(l_inst_mod_no) = lines( package_manager->mt_installed_modules ).
     IF l_inst_mod_no >= 4.
       l_inst_mod_no = l_inst_mod_no - 3.
     ENDIF.
-    DATA(l_inst_deprecated_mod_ins_no) = lines( sdk_package_manager->get_sdk_deprecated_mod_inst( ) ).
-    DATA(l_avail_modules_no) = lines( sdk_package_manager->mt_available_modules_inst ) - ( l_inst_mod_no - l_inst_deprecated_mod_ins_no ).
+    DATA(l_inst_deprecated_mod_ins_no) = lines( package_manager->get_sdk_deprecated_mod_inst( ) ).
+    DATA(l_avail_modules_no) = lines( package_manager->mt_available_modules_inst ) - ( l_inst_mod_no - l_inst_deprecated_mod_ins_no ).
 
-    IF lines( sdk_package_manager->mt_installed_modules ) = 0.
+    IF lines( package_manager->mt_installed_modules ) = 0.
       l_avail_modules_no = l_avail_modules_no - 4.
     ENDIF.
 
@@ -4632,7 +4860,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
                    ir_node_key  = lr_key ) ##NO_TEXT.
 
     "------ Available Modules subfolder Popular Modules
-    DATA(l_popular_modules_no) = lines( mt_popular_modules ) - lines( FILTER #( sdk_package_manager->mt_installed_modules IN mt_popular_modules WHERE tla = tla ) ).
+    DATA(l_popular_modules_no) = lines( mt_popular_modules ) - lines( FILTER #( package_manager->mt_installed_modules IN mt_popular_modules WHERE tla = tla ) ).
     DATA(l_popular_modules_text) = 'Popular Modules (' && l_popular_modules_no && ')' ##NO_TEXT.
     DATA(l_popular_modules_lvc) = CONV lvc_value( l_popular_modules_text ).
 
@@ -4677,11 +4905,11 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
 
     "------ Module list compilation
-    SORT sdk_package_manager->mt_available_modules_inst BY tla.
+    SORT package_manager->mt_available_modules_inst BY tla.
 
     DATA wa_installed_module TYPE ts_sdk_module.
 
-    LOOP AT sdk_package_manager->mt_available_modules_inst ASSIGNING FIELD-SYMBOL(<fs_available_module>).
+    LOOP AT package_manager->mt_available_modules_inst ASSIGNING FIELD-SYMBOL(<fs_available_module>).
       CLEAR: lr_node.
 
       IF <fs_available_module>-tla = 'core'.
@@ -4690,7 +4918,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
       ELSE.
         CLEAR wa_installed_module.
-        READ TABLE sdk_package_manager->mt_installed_modules WITH KEY tla = <fs_available_module>-tla INTO wa_installed_module.
+        READ TABLE package_manager->mt_installed_modules WITH KEY tla = <fs_available_module>-tla INTO wa_installed_module.
         IF sy-subrc = 0.
           CONTINUE. " Module is already installed, skipping...
 
@@ -4767,7 +4995,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
       ENDIF.
 
 
-      IF sdk_package_manager->job_manager->is_job_running( ).
+      IF job_manager->is_job_running( ).
         lr_item->set_editable( abap_false ).
       ENDIF.
 
@@ -4791,11 +5019,11 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
 
     " Job already running?
-    IF sdk_package_manager->job_manager->is_job_running( ).
+    IF job_manager->is_job_running( ).
 
       " get job number
       DATA: lt_joblist TYPE tbtcjob_tt.
-      lt_joblist = sdk_package_manager->job_manager->get_running_jobs( i_jobname = sy-repid ).
+      lt_joblist = job_manager->get_running_jobs( i_jobname = sy-repid ).
       DATA wa_job TYPE tbtcjob.
       READ TABLE lt_joblist INTO wa_job INDEX 1.
       IF sy-subrc <> 0.
@@ -4847,18 +5075,18 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
   METHOD refresh.
 
-    sdk_package_manager->mt_installed_modules = sdk_package_manager->get_sdk_installed_modules( ).
+    package_manager->mt_installed_modules = package_manager->get_sdk_installed_modules( ).
 
-    sdk_package_manager->mt_available_modules_inst = sdk_package_manager->get_sdk_avail_modules_json( i_operation = 'install'
-                                                                                                      i_source    = 'web'
-                                                                                                      i_version   = 'LATEST' ).
+    package_manager->mt_available_modules_inst = package_manager->get_sdk_avail_modules_json( i_operation = 'install'
+                                                                                              i_source    = 'web'
+                                                                                              i_version   = 'LATEST' ).
 
-    sdk_package_manager->mt_available_modules_uninst = sdk_package_manager->get_sdk_avail_modules_json( i_operation = 'uninstall'
-                                                                                                        i_source    = 'web'
-                                                                                                        i_version   = 'LATEST' ).
+    package_manager->mt_available_modules_uninst = package_manager->get_sdk_avail_modules_json( i_operation = 'uninstall'
+                                                                                                i_source    = 'web'
+                                                                                                i_version   = 'LATEST' ).
 
 
-    IF NOT sdk_package_manager->job_manager->is_job_running( ).
+    IF NOT job_manager->is_job_running( ).
       CLEAR: mt_modules_to_be_installed.
       CLEAR: mt_modules_to_be_deleted.
     ENDIF.
@@ -4870,8 +5098,8 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
     MESSAGE |Refresh complete.| TYPE 'S' ##NO_TEXT.
 
-    IF sdk_package_manager->job_manager->is_job_running( ).
-      lcl_ui_utils=>display_job_details_statusbar( i_job_manager = sdk_package_manager->job_manager ).
+    IF job_manager->is_job_running( ).
+      lcl_ui_utils=>display_job_details_statusbar( ).
     ENDIF.
 
   ENDMETHOD.
@@ -4896,7 +5124,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
         lr_functions = mr_tree->get_functions( ).
 
         " If a job is running we deactivate all buttons that could interfere with the running op
-        IF sdk_package_manager->job_manager->is_job_running( ) = abap_true.
+        IF job_manager->is_job_running( ) = abap_true.
           lr_functions->enable_function( name    = 'EXE_FGND'
                                          boolean = ' ' ).
           lr_functions->enable_function( name    = 'EXE_BGND'
@@ -4953,7 +5181,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
           lr_functions->enable_function( name    = 'BTC_DTLS'
                                          boolean = ' ' ).
 
-          IF lines( sdk_package_manager->mt_installed_modules ) > 4.  " if core is installed, activate the select/deslected buttons
+          IF lines( package_manager->mt_installed_modules ) > 4.  " if core is installed, activate the select/deslected buttons
             lr_functions->enable_function( name    = 'UPD_INST'
                                            boolean = 'X' ).
             lr_functions->enable_function( name    = 'DES_INST'
@@ -5141,7 +5369,6 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
 
   METHOD fill_container_content.
-
     TRY.
         cl_salv_tree=>factory( EXPORTING r_container = r_container
                                          hide_header = abap_false
@@ -5151,7 +5378,6 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
     ENDTRY.
 
     mr_container = r_container.
-
     draw_tree( ).
 
   ENDMETHOD.
@@ -5198,7 +5424,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
             AND CAST string( <fs_node>-node->get_item( 'OP_CODE' )->get_value( ) )->* = lif_ui_constants=>c_operation_install.
 
             DATA(tla) = <fs_node>-node->get_text( ).
-            IF sdk_package_manager->is_module_core( CONV #( tla ) ).
+            IF package_manager->is_module_core( CONV #( tla ) ).
               tla = 'core'.
             ENDIF.
             CHECK NOT line_exists( rt_modules_to_be_installed[  tla = tla ] ).
@@ -5235,7 +5461,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
           AND CAST string( <fs_node>-node->get_item( 'OP_CODE' )->get_value( ) )->* = lif_ui_constants=>c_operation_delete.
 
             DATA(tla) = <fs_node>-node->get_text( ).
-            IF sdk_package_manager->is_module_core( CONV #( tla ) ).
+            IF package_manager->is_module_core( CONV #( tla ) ).
               tla = 'core'.
             ENDIF.
             CHECK NOT line_exists( rt_modules_to_be_deleted[ tla = tla ] ).
@@ -5275,7 +5501,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
             AND CAST string( <fs_node>-node->get_item( 'OP_CODE' )->get_value( ) )->* = lif_ui_constants=>c_operation_update.
 
             DATA(tla) = <fs_node>-node->get_text( ).
-            IF sdk_package_manager->is_module_core( CONV #( tla ) ).
+            IF package_manager->is_module_core( CONV #( tla ) ).
               tla = 'core'.
             ENDIF.
             INSERT VALUE ts_sdk_tla( tla = tla version = i_target_version ) INTO TABLE rt_modules_to_be_updated.
@@ -5296,10 +5522,9 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
           WHEN 'BACK' OR 'LEAR' OR 'CANC'.
             LEAVE PROGRAM.
         ENDCASE.
-        DATA(command) = lcl_ui_command_factory=>create_command( i_function_code   = e_salv_function
-                                                                i_tree_controller = me ).
-        IF command->can_execute( i_tree_controller = me ).
-          command->execute( i_tree_controller = me ).
+        DATA(command) = lcl_ui_command_factory=>create_command( i_function_code = e_salv_function ).
+        IF command->can_execute( ).
+          command->execute( ).
         ENDIF.
       CATCH lcx_error INTO DATA(lo_ex).
         lo_ex->show( ).
@@ -5323,15 +5548,15 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
         WHEN abap_true.
 
-          IF sdk_package_manager->is_core_installed( ) = abap_false.
+          IF package_manager->is_core_installed( ) = abap_false.
             wa_row-op_text = 'Will be installed.' ##NO_TEXT.
             wa_row-op_icon = '@08@'.
             wa_row-op_code = lif_ui_constants=>c_operation_install.
             l_node->set_data_row( wa_row ).
 
           ELSE.
-            IF lcl_sdk_utils=>cmp_version_string( i_string1 = sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-avers
-                                                          i_string2 = sdk_package_manager->mt_installed_modules[ tla = 'sts' ]-cvers ) = 1.
+            IF lcl_sdk_utils=>cmp_version_string( i_string1 = package_manager->mt_installed_modules[ tla = 'sts' ]-avers
+                                                          i_string2 = package_manager->mt_installed_modules[ tla = 'sts' ]-cvers ) = 1.
               wa_row-op_text = 'Module will be updated.' ##NO_TEXT.
               wa_row-op_icon = '@09@'.
               wa_row-op_code = lif_ui_constants=>c_operation_update.
@@ -5346,7 +5571,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
         WHEN abap_false.
 
-          IF sdk_package_manager->is_core_installed( ) = abap_true.
+          IF package_manager->is_core_installed( ) = abap_true.
             wa_row-op_text = 'Will be deleted.' ##NO_TEXT.
             wa_row-op_icon = '@0A@'.
             wa_row-op_code = lif_ui_constants=>c_operation_delete.
@@ -5369,21 +5594,21 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
         WHEN abap_true.
 
-          IF VALUE #( sdk_package_manager->mt_installed_modules[ tla = l_tla ] OPTIONAL ) IS INITIAL .
+          IF VALUE #( package_manager->mt_installed_modules[ tla = l_tla ] OPTIONAL ) IS INITIAL .
             wa_row-op_text = 'Will be installed.' ##NO_TEXT.
             wa_row-op_icon = '@08@'.
             wa_row-op_code = lif_ui_constants=>c_operation_install.
             l_node->set_data_row( wa_row ).
 
           ELSE.
-            IF lcl_sdk_utils=>cmp_version_string( i_string1 = sdk_package_manager->mt_installed_modules[ tla = l_tla ]-avers
-                                                          i_string2 = sdk_package_manager->mt_installed_modules[ tla = l_tla ]-cvers ) = 1.
+            IF lcl_sdk_utils=>cmp_version_string( i_string1 = package_manager->mt_installed_modules[ tla = l_tla ]-avers
+                                                          i_string2 = package_manager->mt_installed_modules[ tla = l_tla ]-cvers ) = 1.
               wa_row-op_text = 'Module will be updated.' ##NO_TEXT.
               wa_row-op_icon = '@09@' ##NO_TEXT.
               wa_row-op_code = lif_ui_constants=>c_operation_update.
               l_node->set_data_row( wa_row ).
-            ELSEIF lcl_sdk_utils=>cmp_version_string( i_string1 = sdk_package_manager->mt_installed_modules[ tla = l_tla ]-avers
-                                                          i_string2 = sdk_package_manager->mt_installed_modules[ tla = l_tla ]-cvers ) = 0.
+            ELSEIF lcl_sdk_utils=>cmp_version_string( i_string1 = package_manager->mt_installed_modules[ tla = l_tla ]-avers
+                                                          i_string2 = package_manager->mt_installed_modules[ tla = l_tla ]-cvers ) = 0.
               wa_row-op_text = 'Module up to date, no operation planned.' ##NO_TEXT.
               wa_row-op_icon = '@08@' ##NO_TEXT.
               wa_row-op_code = lif_ui_constants=>c_operation_none.
@@ -5399,7 +5624,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
         WHEN abap_false.
 
-          IF VALUE #( sdk_package_manager->mt_installed_modules[ tla = l_tla ] OPTIONAL ) IS NOT INITIAL.
+          IF VALUE #( package_manager->mt_installed_modules[ tla = l_tla ] OPTIONAL ) IS NOT INITIAL.
             wa_row-op_text = 'Will be deleted.' ##NO_TEXT.
             wa_row-op_icon = '@0A@'.
             wa_row-op_code = lif_ui_constants=>c_operation_delete.
@@ -5528,10 +5753,9 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
   ENDMETHOD.
 
 
-
   METHOD toggle_inst_modules.
 
-    IF lines( sdk_package_manager->mt_installed_modules ) > 0.
+    IF lines( package_manager->mt_installed_modules ) > 0.
 
       TRY.
           DATA(lr_inst_mods_nodes) = mr_tree->get_nodes( )->get_node( node_key = mt_folder_node_keys[ node_name = 'installed_modules' ]-key )->get_children( ).
@@ -5559,30 +5783,143 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 ENDCLASS.
 
 
+CLASS lcl_sdk_installer DEFINITION FINAL CREATE PRIVATE.
+  PUBLIC SECTION.
+    CLASS-METHODS:
+      get_instance RETURNING VALUE(r_sdk_installer) TYPE REF TO lcl_sdk_installer.
+
+  PRIVATE SECTION.
+    CLASS-DATA:
+      sdk_installer TYPE REF TO lcl_sdk_installer.
+
+    DATA:
+      package_manager     TYPE REF TO lcl_sdk_package_manager,
+      tree_controller     TYPE REF TO lcl_ui_tree_controller,
+      internet_manager    TYPE REF TO lif_sdk_internet_manager,
+      certificate_manager TYPE REF TO lif_sdk_certificate_manager.
+
+    METHODS:
+      constructor IMPORTING i_internet_manager    TYPE REF TO lif_sdk_internet_manager OPTIONAL
+                            i_certificate_manager TYPE REF TO lif_sdk_certificate_manager OPTIONAL,
+      check_internet_access RAISING lcx_error,
+      retrieve_missing_certificates RAISING   lcx_error.
+
+ENDCLASS.
+
+CLASS lcl_sdk_installer IMPLEMENTATION.
+
+  METHOD constructor.
+    IF i_internet_manager IS BOUND.
+      internet_manager = i_internet_manager.
+    ELSE.
+      internet_manager = lcl_sdk_internet_manager=>get_instance( ).
+    ENDIF.
+
+    IF i_certificate_manager IS BOUND.
+      certificate_manager = i_certificate_manager.
+    ELSE.
+      certificate_manager = lcl_sdk_certificate_manager=>get_instance( ).
+    ENDIF.
+
+    TRY.
+        IF lcl_sdk_utils=>has_prod_client( ).
+          MESSAGE |System has at least one productive client, please use TMS.| TYPE 'A' ##NO_TEXT.
+        ENDIF.
+
+        check_internet_access( ).
+
+        retrieve_missing_certificates( ).
+
+        IF sy-batch = abap_true.
+          package_manager = lcl_sdk_package_manager=>get_instance( i_batch_mode = abap_true ). " TODO: Refactor to use a runner, not package manager
+        ELSE.
+          tree_controller = lcl_ui_tree_controller=>get_instance( ).
+          tree_controller->init( ). " Needs separate initialization due to SALV handling, see comment on the method implementation
+        ENDIF.
+      CATCH lcx_error INTO DATA(ex).
+        ex->show( ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD check_internet_access.
+    TRY.
+        IF internet_manager->has_internet_access( ) = abap_false.
+          MESSAGE |This report requires HTTP(S) Internet access, please enable before usage.| TYPE 'A' ##NO_TEXT.
+        ENDIF.
+      CATCH lcx_error INTO DATA(r_error).
+        MESSAGE |This report requires HTTP(S) Internet access, please enable before usage.| TYPE 'A' ##NO_TEXT.
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD retrieve_missing_certificates.
+
+    IF lines( certificate_manager->get_missing_amazon_root_certs( ) ) > 0.
+
+      DATA lv_text TYPE string.
+      lv_text = |It appears your system is missing one or more of the five Amazon Root SSL Certificates. |
+                && |These certificates have to be installed in order to download and use the newest version of the ABAP SDK. |
+                && |The report can download and maintain them automatically for you if your SAP system has an Internet connection. |
+                && |Amazon Root SSL Certificates are available from https://www.amazontrust.com/repository/ | ##NO_TEXT.
+
+      DATA lv_answer TYPE c.
+
+      CALL FUNCTION 'POPUP_TO_CONFIRM'
+        EXPORTING
+          titlebar              = ' '
+          diagnose_object       = ' '
+          text_question         = lv_text
+          text_button_1         = |Do it for me|
+          icon_button_1         = ' '
+          text_button_2         = |Not now|
+          icon_button_2         = ' '
+          default_button        = '1'
+          display_cancel_button = ' '
+          userdefined_f1_help   = ' '
+          start_column          = 25
+          start_row             = 6
+          iv_quickinfo_button_1 = ' '
+          iv_quickinfo_button_2 = ' '
+        IMPORTING
+          answer                = lv_answer
+        EXCEPTIONS
+          text_not_found        = 1
+          OTHERS                = 2 ##NO_TEXT.
+      IF sy-subrc <> 0.
+        RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Could not find text for popup| ##NO_TEXT.
+      ENDIF.
+
+      IF lv_answer = 1.
+        certificate_manager->install_amazon_root_certs( ).
+      ELSE.
+        LEAVE PROGRAM.
+      ENDIF.
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD get_instance.
+    IF sdk_installer IS NOT BOUND.
+      sdk_installer = NEW lcl_sdk_installer( ).
+    ENDIF.
+    r_sdk_installer = sdk_installer.
+  ENDMETHOD.
+
+ENDCLASS.
 
 
 CLASS lcl_main DEFINITION FINAL.
   PUBLIC SECTION.
-    METHODS
-      main RAISING lcx_error.
+    METHODS:
+      main.
 ENDCLASS.
 
 CLASS lcl_main IMPLEMENTATION.
   METHOD main.
-    IF sy-batch = abap_true.
-      DATA(sdk_pm_batch) = NEW lcl_sdk_package_manager( i_batch_mode = sy-batch ).
-    ELSE.
-      DATA(sdk_pm) = NEW lcl_sdk_package_manager( ).
-      DATA(sdk_pm_tc) = NEW lcl_ui_tree_controller( i_sdk_package_manager = sdk_pm ).
-    ENDIF.
+    DATA(sdk_installer) = lcl_sdk_installer=>get_instance( ).
   ENDMETHOD.
 ENDCLASS.
 
 
 START-OF-SELECTION.
-  TRY.
-      DATA(lr_main) = NEW lcl_main( ).
-      lr_main->main( ).
-    CATCH lcx_error INTO DATA(lo_ex).
-      lo_ex->show( ).
-  ENDTRY.
+  DATA(main) = NEW lcl_main( ).
+  main->main( ).
