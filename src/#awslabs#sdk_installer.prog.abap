@@ -53,9 +53,9 @@ CLASS lcx_error DEFINITION DEFERRED.
 
 INTERFACE lif_global_constants.
   CONSTANTS:
-    gc_version TYPE string VALUE '1.2.0' ##NO_TEXT,
-    gc_commit  TYPE string VALUE '56d9d00' ##NO_TEXT,
-    gc_date    TYPE string VALUE '2025-11-14 20:58:41 UTC' ##NO_TEXT,
+    gc_version TYPE string VALUE '1.2.1' ##NO_TEXT,
+    gc_commit  TYPE string VALUE '56e751f' ##NO_TEXT,
+    gc_date    TYPE string VALUE '2025-11-14 21:05:23 UTC' ##NO_TEXT,
     gc_url_github_version TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/version.txt'  ##NO_TEXT,
     gc_url_github_raw     TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/%23awslabs%23sdk_installer.prog.abap'  ##NO_TEXT.
 ENDINTERFACE.
