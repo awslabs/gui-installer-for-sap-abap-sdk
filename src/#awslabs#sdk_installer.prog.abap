@@ -82,9 +82,9 @@ CLASS lcx_error DEFINITION DEFERRED.
 
 INTERFACE lif_global_constants.
   CONSTANTS:
-    gc_version TYPE string VALUE '1.2.5' ##NO_TEXT,
-    gc_commit  TYPE string VALUE '4a49945' ##NO_TEXT,
-    gc_date    TYPE string VALUE '2025-11-15 17:36:19 UTC' ##NO_TEXT,
+    gc_version TYPE string VALUE '1.2.6' ##NO_TEXT,
+    gc_commit  TYPE string VALUE '7656e9b' ##NO_TEXT,
+    gc_date    TYPE string VALUE '2025-11-15 17:41:04 UTC' ##NO_TEXT,
     gc_url_github_version TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/version.txt'  ##NO_TEXT,
     gc_url_github_raw     TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/%23awslabs%23sdk_installer.prog.abap'  ##NO_TEXT.
 ENDINTERFACE.
@@ -2317,7 +2317,7 @@ CLASS lcl_sdk_module_manager DEFINITION FINAL CREATE PRIVATE.
 ENDCLASS.
 
 
-
+" TODO: Build interface
 CLASS lcl_sdk_module_manager IMPLEMENTATION.
 
   METHOD get_instance.
@@ -2641,7 +2641,6 @@ CLASS lcl_sdk_module_manager IMPLEMENTATION.
   ENDMETHOD.
 
 
-  " TODO: Somehow non deprecated modules end up in here
   METHOD get_sdk_deprecated_modules.
 
     TRY.
@@ -2944,6 +2943,7 @@ CLASS lcl_sdk_runner_base DEFINITION.
   PRIVATE SECTION.
 ENDCLASS.
 
+" TODO: Handle uninstallation of deprecated modules
 CLASS lcl_sdk_runner_base IMPLEMENTATION.
 
   METHOD constructor.
@@ -4341,6 +4341,7 @@ CLASS lcl_ui_command_chk_upd IMPLEMENTATION.
 
   ENDMETHOD.
 
+  " TODO: Check if Github certs are present and ask for download if not
   METHOD lif_ui_command~can_execute.
     r_result = internet_manager->has_internet_access( ).
   ENDMETHOD.
