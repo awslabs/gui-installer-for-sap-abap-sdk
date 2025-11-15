@@ -82,9 +82,9 @@ CLASS lcx_error DEFINITION DEFERRED.
 
 INTERFACE lif_global_constants.
   CONSTANTS:
-    gc_version TYPE string VALUE '1.2.3' ##NO_TEXT,
-    gc_commit  TYPE string VALUE '5546f75' ##NO_TEXT,
-    gc_date    TYPE string VALUE '2025-11-15 16:12:39 UTC' ##NO_TEXT,
+    gc_version            TYPE string VALUE '1.2.3' ##NO_TEXT,
+    gc_commit             TYPE string VALUE '5546f75' ##NO_TEXT,
+    gc_date               TYPE string VALUE '2025-11-15 16:12:39 UTC' ##NO_TEXT,
     gc_url_github_version TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/version.txt'  ##NO_TEXT,
     gc_url_github_raw     TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/%23awslabs%23sdk_installer.prog.abap'  ##NO_TEXT.
 ENDINTERFACE.
@@ -1537,11 +1537,11 @@ CLASS lcl_sdk_job_manager IMPLEMENTATION.
 
     " Export to shared memory and batch job submission need to go together
     DELETE FROM SHARED BUFFER indx(mi) ID 'MOD_INST'.
-    EXPORT st_modules_to_be_installed = lt_modules_to_be_installed TO SHARED BUFFER indx(mi) ID 'MOD_INST'.
+    EXPORT modules_to_be_installed = lt_modules_to_be_installed TO SHARED BUFFER indx(mi) ID 'MOD_INST'.
     DELETE FROM SHARED BUFFER indx(md) ID 'MOD_DELE'.
-    EXPORT st_modules_to_be_deleted = lt_modules_to_be_deleted TO SHARED BUFFER indx(md) ID 'MOD_DELE'.
+    EXPORT modules_to_be_deleted = lt_modules_to_be_deleted TO SHARED BUFFER indx(md) ID 'MOD_DELE'.
     DELETE FROM SHARED BUFFER indx(tv) ID 'TAR_VERS'.
-    EXPORT s_target_version = lv_target_version TO SHARED BUFFER indx(tv) ID 'TAR_VERS'.
+    EXPORT target_version = lv_target_version TO SHARED BUFFER indx(tv) ID 'TAR_VERS'.
 
 
     DATA(lo_job) = NEW cl_bp_abap_job( ).
@@ -2978,20 +2978,6 @@ CLASS lcl_sdk_runner_base IMPLEMENTATION.
       i_operation = 'uninstall'
       i_source    = 'zip'
       i_version   = i_context->target_version ).
-
-    " TODO: zipfiles collection needs to be properly rehydrated in batch mode
-    IF zipfiles->exists_on_disk_pair( i_version = i_context->target_version ) = abap_false.
-
-      zipfile_inst = NEW lcl_sdk_zipfile( i_op = 'install' i_version = i_context->target_version ).
-      zipfile_uninst = NEW lcl_sdk_zipfile( i_op = 'uninstall' i_version = i_context->target_version ).
-      zipfiles->add_pair( i_zipfile_inst   = zipfile_inst
-                          i_zipfile_uninst = zipfile_uninst ).
-      zipfiles->download_zipfile_pair( i_version = i_context->target_version ).
-
-    ELSE.
-      zipfile_inst = zipfiles->get_by_op_version( i_op = 'install' i_version = i_context->target_version ).
-      zipfile_uninst = zipfiles->get_by_op_version( i_op = 'uninstall' i_version = i_context->target_version ).
-    ENDIF.
   ENDMETHOD.
 
 
@@ -3023,6 +3009,10 @@ CLASS lcl_sdk_runner_foreground IMPLEMENTATION.
     modules_to_be_installed = i_context->modules_to_be_installed.
     modules_to_be_deleted = i_context->modules_to_be_deleted.
     target_version = i_context->target_version.
+
+    zipfile_inst = zipfiles->get_by_op_version( i_op = 'install' i_version = i_context->target_version ).
+    zipfile_uninst = zipfiles->get_by_op_version( i_op = 'uninstall' i_version = i_context->target_version ).
+
     " No re-init of context needed as in foreground, we are still in the same user session
     " Leave call to super at the end to make sure the context attributes have been safely extracted
     super->lif_sdk_runner~prepare( i_context = i_context ).
@@ -3162,6 +3152,15 @@ CLASS lcl_sdk_runner_background IMPLEMENTATION.
     DATA(rehydrated_context) = NEW lcl_sdk_runner_context( i_modules_to_be_installed = modules_to_be_installed
                                                            i_modules_to_be_deleted   = modules_to_be_deleted
                                                            i_target_version          = target_version ).
+
+    " Rehydrate zipfile collection - zipfiles exist on disk but collection is empty in batch mode
+    DATA(zipfile_inst_rehydrated) = NEW lcl_sdk_zipfile( i_op = 'install' i_version = target_version ).
+    DATA(zipfile_uninst_rehydrated) = NEW lcl_sdk_zipfile( i_op = 'uninstall' i_version = target_version ).
+    zipfiles->add_pair( i_zipfile_inst = zipfile_inst_rehydrated i_zipfile_uninst = zipfile_uninst_rehydrated ).
+
+    zipfile_inst = zipfile_inst_rehydrated.
+    zipfile_uninst = zipfile_uninst_rehydrated.
+
 
     " Leave call to super at the end to make sure the context attributes have been safely extracted first
     super->lif_sdk_runner~prepare( i_context = rehydrated_context ).
