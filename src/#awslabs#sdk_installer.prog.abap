@@ -1,3 +1,26 @@
+"~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-
+*  Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+*
+*  Licensed under the Apache License, Version 2.0 (the "License").
+*  You may not use this file except in compliance with the License.
+*  You may obtain a copy of the License at
+*
+*      http://www.apache.org/licenses/LICENSE-2.0
+*
+*  Unless required by applicable law or agreed to in writing, software
+*  distributed under the License is distributed on an "AS IS" BASIS,
+*  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+*  See the License for the specific language governing permissions and
+*  limitations under the License.
+"-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~--~-~-~-~-
+*
+*  Usage:   Using transaction SE80 or SE38, copy & paste the contents of
+*           this file into a new report in a package of your choice.
+*           Activate the report and hit execute.
+*
+*  Authors: @meyro, @frij
+*
+"-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~--~-~-~-~-
 
 REPORT /awslabs/sdk_installer.
 
@@ -9,6 +32,7 @@ INTERFACE lif_sdk_report_update_manager DEFERRED.
 INTERFACE lif_sdk_certificate_manager DEFERRED.
 INTERFACE lif_sdk_file_manager DEFERRED.
 INTERFACE lif_sdk_transport_manager DEFERRED.
+INTERFACE lif_sdk_runner DEFERRED.
 INTERFACE lif_sdk_job_manager DEFERRED.
 
 INTERFACE lif_ui_constants DEFERRED.
@@ -16,17 +40,22 @@ INTERFACE lif_ui_command DEFERRED.
 
 
 CLASS lcl_sdk_installer DEFINITION DEFERRED.
-CLASS lcl_sdk_zipfile DEFINITION DEFERRED.
-CLASS lcl_sdk_zipfile_collection DEFINITION DEFERRED.
-CLASS lcl_sdk_module DEFINITION DEFERRED.
-CLASS lcl_sdk_module_collection DEFINITION DEFERRED.
 CLASS lcl_sdk_internet_manager DEFINITION DEFERRED.
 CLASS lcl_sdk_report_update_manager DEFINITION DEFERRED.
 CLASS lcl_sdk_certificate_manager DEFINITION DEFERRED.
+CLASS lcl_sdk_zipfile DEFINITION DEFERRED.
+CLASS lcl_sdk_zipfile_collection DEFINITION DEFERRED.
 CLASS lcl_sdk_file_manager DEFINITION DEFERRED.
 CLASS lcl_sdk_transport_manager DEFINITION DEFERRED.
+CLASS lcl_sdk_module DEFINITION DEFERRED.
+CLASS lcl_sdk_module_collection DEFINITION DEFERRED.
+CLASS lcl_sdk_module_manager DEFINITION DEFERRED.
+CLASS lcl_sdk_runner_context DEFINITION DEFERRED.
+CLASS lcl_sdk_runner_result DEFINITION DEFERRED.
+CLASS lcl_sdk_runner_base DEFINITION DEFERRED.
+CLASS lcl_sdk_runner_foreground DEFINITION DEFERRED.
+CLASS lcl_sdk_runner_background DEFINITION DEFERRED.
 CLASS lcl_sdk_job_manager DEFINITION DEFERRED.
-CLASS lcl_sdk_package_manager DEFINITION DEFERRED.
 CLASS lcl_sdk_utils DEFINITION DEFERRED.
 
 CLASS lcl_ui_tree_controller DEFINITION DEFERRED.
@@ -53,9 +82,9 @@ CLASS lcx_error DEFINITION DEFERRED.
 
 INTERFACE lif_global_constants.
   CONSTANTS:
-    gc_version TYPE string VALUE '1.2.1' ##NO_TEXT,
-    gc_commit  TYPE string VALUE '56e751f' ##NO_TEXT,
-    gc_date    TYPE string VALUE '2025-11-14 21:05:23 UTC' ##NO_TEXT,
+    gc_version TYPE string VALUE '1.2.4' ##NO_TEXT,
+    gc_commit  TYPE string VALUE '860bea5' ##NO_TEXT,
+    gc_date    TYPE string VALUE '2025-11-15 17:03:53 UTC' ##NO_TEXT,
     gc_url_github_version TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/version.txt'  ##NO_TEXT,
     gc_url_github_raw     TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/%23awslabs%23sdk_installer.prog.abap'  ##NO_TEXT.
 ENDINTERFACE.
@@ -619,7 +648,7 @@ INTERFACE lif_sdk_certificate_manager.
   METHODS:
 
     install_amazon_root_certs RAISING lcx_error,
-    "install_github_root_certs raising lcx_error    " TODO
+    "install_github_root_certs raising lcx_error    " TODO: Implement
     get_missing_amazon_root_certs RETURNING VALUE(rt_missing) TYPE tt_certificate,
     get_missing_github_root_certs RETURNING VALUE(rt_missing) TYPE tt_certificate,
     is_cert_installed IMPORTING i_subject       TYPE string
@@ -885,10 +914,6 @@ CLASS lcl_sdk_certificate_manager IMPLEMENTATION.
   ENDMETHOD.
 
 
-  "TODO: Move to ui tree
-
-
-
   METHOD lif_sdk_certificate_manager~install_amazon_root_certs.
 
     DATA wa_amazon_root_cert TYPE lif_sdk_certificate_manager~ts_certificate.
@@ -1112,7 +1137,7 @@ CLASS lcl_sdk_file_manager IMPLEMENTATION.
       WHEN 1.
         RAISE EXCEPTION TYPE cx_sy_file_authority.
       WHEN 2.
-        RAISE EXCEPTION TYPE cx_sy_file_io. " TODO: Find/Create more appropriate exception for generic case
+        RAISE EXCEPTION TYPE cx_sy_file_io.
     ENDCASE.
 
   ENDMETHOD.
@@ -1512,11 +1537,11 @@ CLASS lcl_sdk_job_manager IMPLEMENTATION.
 
     " Export to shared memory and batch job submission need to go together
     DELETE FROM SHARED BUFFER indx(mi) ID 'MOD_INST'.
-    EXPORT st_modules_to_be_installed = lt_modules_to_be_installed TO SHARED BUFFER indx(mi) ID 'MOD_INST'.
+    EXPORT modules_to_be_installed = lt_modules_to_be_installed TO SHARED BUFFER indx(mi) ID 'MOD_INST'.
     DELETE FROM SHARED BUFFER indx(md) ID 'MOD_DELE'.
-    EXPORT st_modules_to_be_deleted = lt_modules_to_be_deleted TO SHARED BUFFER indx(md) ID 'MOD_DELE'.
+    EXPORT modules_to_be_deleted = lt_modules_to_be_deleted TO SHARED BUFFER indx(md) ID 'MOD_DELE'.
     DELETE FROM SHARED BUFFER indx(tv) ID 'TAR_VERS'.
-    EXPORT s_target_version = lv_target_version TO SHARED BUFFER indx(tv) ID 'TAR_VERS'.
+    EXPORT target_version = lv_target_version TO SHARED BUFFER indx(tv) ID 'TAR_VERS'.
 
 
     DATA(lo_job) = NEW cl_bp_abap_job( ).
@@ -1540,7 +1565,12 @@ CLASS lcl_sdk_job_manager IMPLEMENTATION.
           prog_abap_and_extpg_set = 18 ).
     ENDIF.
     IF sy-subrc = 0.
-      lo_job->if_bp_job_engine~start_immediately( EXCEPTIONS cant_start_immediate = 21 invalid_startdate = 22 jobname_missing = 23 job_close_failed = 24 job_nosteps = 25 job_notex = 26 ).
+      lo_job->if_bp_job_engine~start_immediately( EXCEPTIONS cant_start_immediate = 21
+                                                             invalid_startdate    = 22
+                                                             jobname_missing      = 23
+                                                             job_close_failed     = 24
+                                                             job_nosteps          = 25
+                                                             job_notex            = 26 ).
     ENDIF.
 
     IF sy-subrc <> 0.
@@ -1804,7 +1834,7 @@ CLASS lcl_sdk_zipfile_collection DEFINITION FINAL.
 
 
   PRIVATE SECTION.
-    DATA: mt_sdk_zipfiles  TYPE tt_sdk_zipfile,
+    DATA: mt_zipfiles      TYPE tt_sdk_zipfile,
           internet_manager TYPE REF TO lif_sdk_internet_manager,
           file_manager     TYPE REF TO lif_sdk_file_manager.
 
@@ -1824,13 +1854,13 @@ CLASS lcl_sdk_zipfile_collection DEFINITION FINAL.
 
 ENDCLASS.
 
-
+" TODO: Make this a factory class and rehydrate from the download directory if any zipfiles are already present
 CLASS lcl_sdk_zipfile_collection IMPLEMENTATION.
 
 
   METHOD constructor.
     IF i_zipfiles IS NOT INITIAL.
-      mt_sdk_zipfiles = i_zipfiles.
+      mt_zipfiles = i_zipfiles.
     ELSE.
       add( NEW lcl_sdk_zipfile( i_op = 'install' i_version  = 'LATEST' ) ).
       add( NEW lcl_sdk_zipfile( i_op = 'uninstall' i_version  = 'LATEST' ) ).
@@ -1855,7 +1885,7 @@ CLASS lcl_sdk_zipfile_collection IMPLEMENTATION.
     IF i_zipfile IS NOT BOUND.
       RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Unbound zipfile object reference.| ##NO_TEXT.
     ENDIF.
-    APPEND i_zipfile TO mt_sdk_zipfiles.
+    APPEND i_zipfile TO mt_zipfiles.
   ENDMETHOD.
 
 
@@ -1864,8 +1894,8 @@ CLASS lcl_sdk_zipfile_collection IMPLEMENTATION.
     OR i_zipfile_uninst IS NOT BOUND.
       RAISE EXCEPTION TYPE lcx_error EXPORTING iv_msg = |Unbound zipfile object reference.| ##NO_TEXT.
     ENDIF.
-    APPEND i_zipfile_inst TO mt_sdk_zipfiles.
-    APPEND i_zipfile_uninst TO mt_sdk_zipfiles.
+    APPEND i_zipfile_inst TO mt_zipfiles.
+    APPEND i_zipfile_uninst TO mt_zipfiles.
   ENDMETHOD.
 
 
@@ -1885,7 +1915,7 @@ CLASS lcl_sdk_zipfile_collection IMPLEMENTATION.
 
 
   METHOD get_by_op_version.
-    LOOP AT mt_sdk_zipfiles INTO DATA(wa_zipfile).
+    LOOP AT mt_zipfiles INTO DATA(wa_zipfile).
       IF wa_zipfile->op = i_op AND wa_zipfile->version = i_version.
         r_zipfile = wa_zipfile.
         RETURN.
@@ -2007,7 +2037,7 @@ CLASS lcl_sdk_zipfile_collection IMPLEMENTATION.
 
     DATA(zipfile_available) = abap_false.
 
-    LOOP AT mt_sdk_zipfiles INTO DATA(wa_zipfile).
+    LOOP AT mt_zipfiles INTO DATA(wa_zipfile).
 
       zipfile_available = i_file_manager->lif_sdk_file_manager~check_file_exists_at( i_path = wa_zipfile->path ).
 
@@ -2217,17 +2247,18 @@ CLASS lcl_sdk_module_collection IMPLEMENTATION.
 ENDCLASS.
 
 
-CLASS lcl_sdk_package_manager DEFINITION FINAL CREATE PRIVATE.
+
+CLASS lcl_sdk_module_manager DEFINITION FINAL CREATE PRIVATE.
 
   PUBLIC SECTION.
 
     CLASS-METHODS:
-      get_instance IMPORTING i_batch_mode             TYPE syst-batch
-                   RETURNING VALUE(r_package_manager) TYPE REF TO lcl_sdk_package_manager.
+      get_instance RETURNING VALUE(r_module_manager) TYPE REF TO lcl_sdk_module_manager.
 
     DATA:
-      sdk_zipfiles                TYPE REF TO lcl_sdk_zipfile_collection READ-ONLY, " TODO: Refactor to use objects instead of typed tables
+      zipfiles                    TYPE REF TO lcl_sdk_zipfile_collection READ-ONLY, " TODO: Refactor to use objects instead of typed tables
       mt_installed_modules        TYPE tt_sdk_module,
+      mt_deprecated_modules       TYPE tt_sdk_module,
       mt_available_modules_inst   TYPE tt_sdk_module,   " available modules for installation  (i.e. install transports)
       mt_available_modules_uninst TYPE tt_sdk_module.   " available modules for uninstallation (i.e. uninstall transports)
 
@@ -2249,7 +2280,7 @@ CLASS lcl_sdk_package_manager DEFINITION FINAL CREATE PRIVATE.
                         RETURNING VALUE(r_result) TYPE abap_bool,
       get_sdk_installed_modules RETURNING VALUE(r_installed_modules) TYPE tt_sdk_module
                                 RAISING   lcx_error,
-      get_sdk_deprecated_mod_inst RETURNING VALUE(r_deprecated_modules) TYPE tt_sdk_module,
+      get_sdk_deprecated_modules RETURNING VALUE(r_deprecated_modules) TYPE tt_sdk_module,
       get_sdk_avail_modules_json IMPORTING i_operation                TYPE string
                                            i_source                   TYPE string
                                            i_version                  TYPE string DEFAULT 'LATEST'
@@ -2258,23 +2289,14 @@ CLASS lcl_sdk_package_manager DEFINITION FINAL CREATE PRIVATE.
       update_zipfiles_if_outdated IMPORTING i_avers_core_inst   TYPE string
                                             i_avers_core_uninst TYPE string
                                   RETURNING VALUE(r_result)     TYPE abap_bool
-                                  RAISING   lcx_error,
-      run_foreground IMPORTING i_modules_to_be_installed TYPE tt_sdk_tla
-                               i_modules_to_be_deleted   TYPE tt_sdk_tla
-                               i_target_version          TYPE string
-                     EXPORTING e_tp_rc_inst              TYPE stpa-retcode
-                               es_exception_inst         TYPE stmscalert
-                               e_tp_rc_uninst            TYPE stpa-retcode
-                               es_exception_uninst       TYPE stmscalert
-                     RAISING   lcx_error,
-      run_background RAISING   lcx_error.
+                                  RAISING   lcx_error.
 
 
   PROTECTED SECTION.
 
   PRIVATE SECTION.
     CLASS-DATA:
-      package_manager TYPE REF TO lcl_sdk_package_manager.
+      module_manager TYPE REF TO lcl_sdk_module_manager.
 
     DATA: internet_manager      TYPE REF TO lif_sdk_internet_manager,
           file_manager          TYPE REF TO lif_sdk_file_manager,
@@ -2289,24 +2311,24 @@ CLASS lcl_sdk_package_manager DEFINITION FINAL CREATE PRIVATE.
                             i_transport_manager    TYPE REF TO lif_sdk_transport_manager OPTIONAL
                             i_job_manager          TYPE REF TO lif_sdk_job_manager OPTIONAL
                             i_report_update_manger TYPE REF TO lif_sdk_report_update_manager OPTIONAL
-                            i_sdk_zipfiles         TYPE REF TO lcl_sdk_zipfile_collection OPTIONAL
+                            i_zipfiles             TYPE REF TO lcl_sdk_zipfile_collection OPTIONAL
                   RAISING   lcx_error.
 
 ENDCLASS.
 
 
 
-CLASS lcl_sdk_package_manager IMPLEMENTATION.
+CLASS lcl_sdk_module_manager IMPLEMENTATION.
 
   METHOD get_instance.
-    IF package_manager IS NOT BOUND.
+    IF module_manager IS NOT BOUND.
       TRY.
-          package_manager = NEW lcl_sdk_package_manager( i_batch_mode = i_batch_mode ). " TODO: Clean up batch mode vs foregound mode, batch should just trigger a runner exection
+          module_manager = NEW lcl_sdk_module_manager( ).
         CATCH lcx_error INTO DATA(ex).
           ex->show( ).
       ENDTRY.
     ENDIF.
-    r_package_manager = package_manager.
+    r_module_manager = module_manager.
   ENDMETHOD.
 
   METHOD constructor.
@@ -2341,13 +2363,15 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
       report_update_manager = lcl_sdk_report_update_manager=>get_instance( ).
     ENDIF.
 
-    IF i_sdk_zipfiles IS BOUND.
-      sdk_zipfiles = i_sdk_zipfiles.
+    IF i_zipfiles IS BOUND.
+      zipfiles = i_zipfiles.
     ELSE.
-      sdk_zipfiles = NEW lcl_sdk_zipfile_collection( ).
+      zipfiles = NEW lcl_sdk_zipfile_collection( ).
     ENDIF.
 
     mt_installed_modules = get_sdk_installed_modules( ).
+
+    mt_deprecated_modules = get_sdk_deprecated_modules( ).
 
 
     mt_available_modules_inst = get_sdk_avail_modules_json( i_operation = 'install'
@@ -2358,14 +2382,10 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
                                                               i_source    = 'web'
                                                               i_version   = 'LATEST' ) ##NO_TEXT.
 
-    IF i_batch_mode = abap_true.
-      run_background( ).
-    ENDIF.
-
   ENDMETHOD.
 
   METHOD is_deprecated.
-    DATA(deprecated_modules) = get_sdk_deprecated_mod_inst( ).
+    DATA(deprecated_modules) = get_sdk_deprecated_modules( ).
     r_result = xsdbool( line_exists( deprecated_modules[ tla = i_tla ] ) ).
   ENDMETHOD.
 
@@ -2387,7 +2407,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
 
     IF lines( lt_modules_to_be_installed ) > 0.
 
-      IF sdk_zipfiles->ensure_zipfiles_downloaded( i_version = lv_target_version ) = abap_false.
+      IF zipfiles->ensure_zipfiles_downloaded( i_version = lv_target_version ) = abap_false.
         RETURN.
       ENDIF.
 
@@ -2425,7 +2445,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
                                           i_string2 = lt_mod_avail_uninst_zip[ tla = 'core' ]-avers ) = 1.
       MESSAGE 'One or more ABAP SDK zipfiles not current. Downloading new version now.' TYPE 'I' ##NO_TEXT.
       TRY.
-          sdk_zipfiles->download_zipfile_pair( i_version = 'LATEST' ).
+          zipfiles->download_zipfile_pair( i_version = 'LATEST' ).
         CATCH lcx_error.
           MESSAGE 'One or more ABAP SDK zipfiles could not be successfully downloaded, aborting' TYPE 'I' DISPLAY LIKE 'E' ##NO_TEXT.
           r_result = abap_false.
@@ -2619,7 +2639,7 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
 
 
 
-  METHOD get_sdk_deprecated_mod_inst.
+  METHOD get_sdk_deprecated_modules.
 
     TRY.
         DATA(lt_installed_modules) = get_sdk_installed_modules( ).
@@ -2650,13 +2670,13 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
     CASE i_source.
       WHEN 'web'.
 
-        DATA(l_jsonx) = internet_manager->download( i_absolute_uri = sdk_zipfiles->get_by_op_version( i_op = i_operation i_version = i_version )->json_web
+        DATA(l_jsonx) = internet_manager->download( i_absolute_uri = zipfiles->get_by_op_version( i_op = i_operation i_version = i_version )->json_web
                                                     i_blankstocrlf = abap_false ).
 
 
       WHEN 'zip'.
 
-        l_jsonx = file_manager->get_file_from_zip( i_zipfile_absolute_path = sdk_zipfiles->get_by_op_version( i_op = i_operation i_version = i_version )->path
+        l_jsonx = file_manager->get_file_from_zip( i_zipfile_absolute_path = zipfiles->get_by_op_version( i_op = i_operation i_version = i_version )->path
                                                    i_file_to_retrieve      = lif_sdk_constants=>c_sdk_index_json_zip_path ).
 
       WHEN 'others'.
@@ -2827,48 +2847,200 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD run_foreground.
+ENDCLASS.
 
-    DATA: l_tp_ret_code_inst TYPE stpa-retcode.
-    DATA: ls_exception_inst TYPE stmscalert.
 
-    DATA: l_tp_ret_code_uninst TYPE stpa-retcode.
-    DATA: ls_exception_uninst TYPE stmscalert.
+CLASS lcl_sdk_runner_context DEFINITION FINAL.
+  PUBLIC SECTION.
+    DATA:
+      modules_to_be_installed TYPE tt_sdk_tla READ-ONLY,
+      modules_to_be_deleted   TYPE tt_sdk_tla READ-ONLY,
+      target_version          TYPE string READ-ONLY.
+    METHODS:
+      constructor IMPORTING i_modules_to_be_installed TYPE tt_sdk_tla OPTIONAL
+                            i_modules_to_be_deleted   TYPE tt_sdk_tla OPTIONAL
+                            i_target_version          TYPE string OPTIONAL.
+ENDCLASS.
 
-    DATA(lt_modules_to_be_installed) = i_modules_to_be_installed.
-    DATA(lt_modules_to_be_deleted) = i_modules_to_be_deleted.
+CLASS lcl_sdk_runner_context IMPLEMENTATION.
+  METHOD constructor.
+    modules_to_be_installed = i_modules_to_be_installed.
+    modules_to_be_deleted = i_modules_to_be_deleted.
+    target_version = i_target_version.
+  ENDMETHOD.
+ENDCLASS.
 
-    DATA lt_transport_list_inst TYPE stms_tr_requests.
-    DATA lt_transport_list_uninst TYPE stms_tr_requests.
 
-    DATA lt_avail_modules_inst TYPE tt_sdk_module.
-    lt_avail_modules_inst = get_sdk_avail_modules_json(
+CLASS lcl_sdk_runner_result DEFINITION FINAL.
+  PUBLIC SECTION.
+    DATA:
+      tp_rc_inst       TYPE stpa-retcode READ-ONLY,
+      exception_inst   TYPE stmscalert READ-ONLY,
+      tp_rc_uninst     TYPE stpa-retcode READ-ONLY,
+      exception_uninst TYPE stmscalert READ-ONLY.
+    METHODS:
+      constructor IMPORTING i_tp_rc_inst       TYPE stpa-retcode
+                            i_exception_inst   TYPE stmscalert
+                            i_tp_rc_uninst     TYPE stpa-retcode
+                            i_exception_uninst TYPE stmscalert.
+ENDCLASS.
+
+CLASS lcl_sdk_runner_result IMPLEMENTATION.
+  METHOD constructor.
+    tp_rc_inst = i_tp_rc_inst.
+    exception_inst = i_exception_inst.
+    tp_rc_uninst = i_tp_rc_uninst.
+    exception_uninst = i_exception_uninst.
+  ENDMETHOD.
+ENDCLASS.
+
+
+INTERFACE lif_sdk_runner.
+  METHODS:
+    prepare IMPORTING i_context TYPE REF TO lcl_sdk_runner_context
+            RAISING   lcx_error,
+    run IMPORTING i_context       TYPE REF TO lcl_sdk_runner_context
+        RETURNING VALUE(r_result) TYPE REF TO lcl_sdk_runner_result
+        RAISING   lcx_error,
+    cleanup IMPORTING i_context TYPE REF TO lcl_sdk_runner_context
+            RAISING   lcx_error.
+ENDINTERFACE.
+
+CLASS lcl_sdk_runner_base DEFINITION.
+  PUBLIC SECTION.
+    INTERFACES:
+      lif_sdk_runner.
+
+    METHODS:
+      constructor IMPORTING i_zipfiles          TYPE REF TO lcl_sdk_zipfile_collection OPTIONAL
+                            i_transport_manager TYPE REF TO lif_sdk_transport_manager OPTIONAL
+                            i_module_manager    TYPE REF TO lcl_sdk_module_manager OPTIONAL
+                  RAISING   lcx_error,
+      execute IMPORTING i_context       TYPE REF TO lcl_sdk_runner_context
+              RETURNING VALUE(r_result) TYPE REF TO lcl_sdk_runner_result
+              RAISING   lcx_error.
+
+  PROTECTED SECTION.
+    DATA: transport_manager TYPE REF TO lif_sdk_transport_manager,
+          module_manager    TYPE REF TO lcl_sdk_module_manager.
+
+    DATA: zipfiles       TYPE REF TO lcl_sdk_zipfile_collection,
+          zipfile_inst   TYPE REF TO lcl_sdk_zipfile,
+          zipfile_uninst TYPE REF TO lcl_sdk_zipfile.
+
+    DATA: modules_to_be_installed TYPE tt_sdk_tla,
+          modules_to_be_deleted   TYPE tt_sdk_tla,
+          target_version          TYPE string.
+
+    DATA: avail_modules_inst   TYPE tt_sdk_module,
+          avail_modules_uninst TYPE tt_sdk_module.
+
+    DATA: transport_list_inst   TYPE stms_tr_requests,
+          transport_list_uninst TYPE stms_tr_requests.
+
+    DATA: tp_rc_inst       TYPE stpa-retcode,
+          exception_inst   TYPE stmscalert,
+          tp_rc_uninst     TYPE stpa-retcode,
+          exception_uninst TYPE stmscalert.
+
+  PRIVATE SECTION.
+ENDCLASS.
+
+CLASS lcl_sdk_runner_base IMPLEMENTATION.
+
+  METHOD constructor.
+
+    IF i_zipfiles IS BOUND.
+      zipfiles = i_zipfiles.
+    ELSE.
+      zipfiles = NEW lcl_sdk_zipfile_collection( ).
+    ENDIF.
+
+    IF i_transport_manager IS BOUND.
+      transport_manager = i_transport_manager.
+    ENDIF.
+    transport_manager = lcl_sdk_transport_manager=>get_instance( ).
+
+    IF i_module_manager IS BOUND.
+      module_manager = i_module_manager.
+    ENDIF.
+    module_manager = lcl_sdk_module_manager=>get_instance( ).
+
+  ENDMETHOD.
+
+  METHOD lif_sdk_runner~prepare.
+    avail_modules_inst = module_manager->get_sdk_avail_modules_json(
       i_operation = 'install'
       i_source    = 'zip'
-      i_version   = i_target_version
-    ).
+      i_version   = i_context->target_version ).
 
-    LOOP AT lt_modules_to_be_installed ASSIGNING FIELD-SYMBOL(<fs_module_to_be_installed>).
+    avail_modules_uninst = module_manager->get_sdk_avail_modules_json(
+      i_operation = 'uninstall'
+      i_source    = 'zip'
+      i_version   = i_context->target_version ).
+  ENDMETHOD.
+
+
+  METHOD lif_sdk_runner~run.
+  ENDMETHOD.
+
+  METHOD lif_sdk_runner~cleanup.
+  ENDMETHOD.
+
+  METHOD execute.
+    me->lif_sdk_runner~prepare( i_context = i_context ).
+    r_result = me->lif_sdk_runner~run( i_context = i_context ).
+    me->lif_sdk_runner~cleanup( i_context = i_context ).
+  ENDMETHOD.
+ENDCLASS.
+
+
+CLASS lcl_sdk_runner_foreground DEFINITION FINAL INHERITING FROM lcl_sdk_runner_base.
+  PUBLIC SECTION.
+    METHODS:
+      lif_sdk_runner~prepare REDEFINITION,
+      lif_sdk_runner~run REDEFINITION,
+      lif_sdk_runner~cleanup REDEFINITION.
+ENDCLASS.
+
+CLASS lcl_sdk_runner_foreground IMPLEMENTATION.
+
+  METHOD lif_sdk_runner~prepare.
+    modules_to_be_installed = i_context->modules_to_be_installed.
+    modules_to_be_deleted = i_context->modules_to_be_deleted.
+    target_version = i_context->target_version.
+
+    zipfile_inst = zipfiles->get_by_op_version( i_op = 'install' i_version = i_context->target_version ).
+    zipfile_uninst = zipfiles->get_by_op_version( i_op = 'uninstall' i_version = i_context->target_version ).
+
+    " No re-init of context needed as in foreground, we are still in the same user session
+    " Leave call to super at the end to make sure the context attributes have been safely extracted
+    super->lif_sdk_runner~prepare( i_context = i_context ).
+  ENDMETHOD.
+
+  METHOD lif_sdk_runner~run.
+    super->lif_sdk_runner~run( i_context = i_context ).
+
+    LOOP AT modules_to_be_installed ASSIGNING FIELD-SYMBOL(<fs_module_to_be_installed>).
 
       transport_manager->get_sdk_cofile_from_zip(
         EXPORTING
-          i_tla                   = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla
-          i_transport             = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
+          i_tla                   = avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla
+          i_transport             = avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
           i_operation             = 'install'
-          i_version               = i_target_version
-          i_zipfile_absolute_path = sdk_zipfiles->get_by_op_version( i_op = 'install' i_version = i_target_version )->path
+          i_version               = target_version
+          i_zipfile_absolute_path = zipfile_inst->path
         IMPORTING
           e_cofile_name           = DATA(l_cofile_name)
           e_cofile_blob           = DATA(l_cofile_blob) ).
 
-
       transport_manager->get_sdk_datafile_from_zip(
         EXPORTING
-          i_tla                   = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla
-          i_transport             = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
+          i_tla                   = avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla
+          i_transport             = avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
           i_operation             = 'install'
-          i_version               = i_target_version
-          i_zipfile_absolute_path = sdk_zipfiles->get_by_op_version( i_op = 'install' i_version = i_target_version )->path
+          i_version               = target_version
+          i_zipfile_absolute_path = zipfile_inst->path
         IMPORTING
           e_datafile_name         = DATA(l_datafile_name)
           e_datafile_blob         = DATA(l_datafile_blob) ).
@@ -2881,43 +3053,29 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
         i_datafile_blob = l_datafile_blob ).
 
       INSERT VALUE stms_tr_request(
-      trkorr = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
+      trkorr = avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
       tarcli = sy-mandt
-      ) INTO TABLE lt_transport_list_inst.
+      ) INTO TABLE transport_list_inst.
 
     ENDLOOP.
 
     CALL METHOD transport_manager->import_sdk_transports
       EXPORTING
-        it_transport_names = lt_transport_list_inst
+        it_transport_names = transport_list_inst
       IMPORTING
-        e_tp_retcode       = l_tp_ret_code_inst
-        es_exception       = ls_exception_inst.
-
-    e_tp_rc_inst = l_tp_ret_code_inst.
-    es_exception_inst = ls_exception_inst.
+        e_tp_retcode       = DATA(l_tp_ret_code_inst)
+        es_exception       = DATA(ls_exception_inst).
 
 
-
-
-
-    LOOP AT lt_modules_to_be_deleted ASSIGNING FIELD-SYMBOL(<fs_module_to_be_deleted>).
-
-      DATA lt_avail_modules_uninst TYPE tt_sdk_module.
-      lt_avail_modules_uninst = get_sdk_avail_modules_json(
-        i_operation = 'uninstall'
-        i_source    = 'zip'
-        i_version   = i_target_version
-      ).
-
+    LOOP AT modules_to_be_deleted ASSIGNING FIELD-SYMBOL(<fs_module_to_be_deleted>).
 
       transport_manager->get_sdk_cofile_from_zip(
         EXPORTING
-          i_tla                   = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-tla
-          i_transport             = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
+          i_tla                   = avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-tla
+          i_transport             = avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
           i_operation             = 'uninstall'
-          i_version               = i_target_version
-          i_zipfile_absolute_path = sdk_zipfiles->get_by_op_version( i_op = 'uninstall' i_version = i_target_version )->path
+          i_version               = target_version
+          i_zipfile_absolute_path = zipfile_uninst->path
         IMPORTING
           e_cofile_name           = DATA(l_uninstall_cofile_name)
           e_cofile_blob           = DATA(l_uninstall_cofile_blob) ).
@@ -2925,11 +3083,11 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
 
       transport_manager->get_sdk_datafile_from_zip(
         EXPORTING
-          i_tla                   = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-tla
-          i_transport             = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
+          i_tla                   = avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-tla
+          i_transport             = avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
           i_operation             = 'uninstall'
-          i_version               = i_target_version
-          i_zipfile_absolute_path = sdk_zipfiles->get_by_op_version( i_op = 'uninstall' i_version = i_target_version )->path
+          i_version               = target_version
+          i_zipfile_absolute_path = zipfile_uninst->path
         IMPORTING
           e_datafile_name         = DATA(l_uninstall_datafile_name)
           e_datafile_blob         = DATA(l_uninstall_datafile_blob) ).
@@ -2946,114 +3104,115 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
 
 
       INSERT VALUE stms_tr_request(
-      trkorr = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
+      trkorr = avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
       tarcli = sy-mandt
-      ) INTO TABLE lt_transport_list_uninst.
+      ) INTO TABLE transport_list_uninst.
 
     ENDLOOP.
 
+
     CALL METHOD transport_manager->import_sdk_transports
       EXPORTING
-        it_transport_names = lt_transport_list_uninst
+        it_transport_names = transport_list_uninst
       IMPORTING
-        e_tp_retcode       = l_tp_ret_code_uninst
-        es_exception       = ls_exception_uninst.
+        e_tp_retcode       = DATA(tp_ret_code_uninst)
+        es_exception       = DATA(ls_exception_uninst).
 
-    e_tp_rc_uninst = l_tp_ret_code_uninst.
-    es_exception_uninst = ls_exception_uninst.
 
+    r_result = NEW lcl_sdk_runner_result(
+      i_tp_rc_inst       = l_tp_ret_code_inst
+      i_exception_inst   = ls_exception_inst
+      i_tp_rc_uninst     = tp_ret_code_uninst
+      i_exception_uninst = ls_exception_uninst
+    ).
 
   ENDMETHOD.
 
+  METHOD lif_sdk_runner~cleanup.
+    super->lif_sdk_runner~cleanup( i_context = i_context ).
+  ENDMETHOD.
+ENDCLASS.
 
 
+CLASS lcl_sdk_runner_background DEFINITION FINAL INHERITING FROM lcl_sdk_runner_base.
+  PUBLIC SECTION.
+    METHODS:
+      lif_sdk_runner~prepare REDEFINITION,
+      lif_sdk_runner~run REDEFINITION,
+      lif_sdk_runner~cleanup REDEFINITION.
+ENDCLASS.
+
+CLASS lcl_sdk_runner_background IMPLEMENTATION.
+  METHOD lif_sdk_runner~prepare.
+    IMPORT modules_to_be_installed = modules_to_be_installed FROM SHARED BUFFER indx(mi) ID 'MOD_INST'.
+    IMPORT modules_to_be_deleted = modules_to_be_deleted FROM SHARED BUFFER indx(md) ID 'MOD_DELE'.
+    IMPORT target_version = target_version FROM SHARED BUFFER indx(tv) ID 'TAR_VERS'.
+
+    " Context object will be empty at batch runtime as it needs to be rehydrated from shared storage
+    DATA(rehydrated_context) = NEW lcl_sdk_runner_context( i_modules_to_be_installed = modules_to_be_installed
+                                                           i_modules_to_be_deleted   = modules_to_be_deleted
+                                                           i_target_version          = target_version ).
+
+    " Rehydrate zipfile collection - zipfiles exist on disk but collection is empty in batch mode
+    DATA(zipfile_inst_rehydrated) = NEW lcl_sdk_zipfile( i_op = 'install' i_version = target_version ).
+    DATA(zipfile_uninst_rehydrated) = NEW lcl_sdk_zipfile( i_op = 'uninstall' i_version = target_version ).
+    zipfiles->add_pair( i_zipfile_inst = zipfile_inst_rehydrated i_zipfile_uninst = zipfile_uninst_rehydrated ).
+
+    zipfile_inst = zipfile_inst_rehydrated.
+    zipfile_uninst = zipfile_uninst_rehydrated.
 
 
-  METHOD run_background.
-
-    DATA: l_tp_rc_inst TYPE stpa-retcode.
-    DATA: ls_exception_inst TYPE stmscalert.
-    DATA: l_tp_rc_uninst TYPE stpa-retcode.
-    DATA: ls_exception_uninst TYPE stmscalert.
+    " Leave call to super at the end to make sure the context attributes have been safely extracted first
+    super->lif_sdk_runner~prepare( i_context = rehydrated_context ).
+  ENDMETHOD.
 
 
-    DATA: st_modules_to_be_installed TYPE tt_sdk_tla.
-    DATA: st_modules_to_be_deleted TYPE tt_sdk_tla.
-    DATA: s_target_version TYPE string.
-
-    DATA: lt_transport_list_inst TYPE stms_tr_requests.
-    DATA: lt_transport_list_uninst TYPE stms_tr_requests.
-
-    IMPORT st_modules_to_be_installed = st_modules_to_be_installed FROM SHARED BUFFER indx(mi) ID 'MOD_INST'.
-    IMPORT st_modules_to_be_deleted = st_modules_to_be_deleted FROM SHARED BUFFER indx(md) ID 'MOD_DELE'.
-    IMPORT s_target_version = s_target_version FROM SHARED BUFFER indx(tv) ID 'TAR_VERS'.
-
-
-    IF sdk_zipfiles->exists_on_disk_pair( i_version = s_target_version ) = abap_false.
-
-      DATA(wa_zipfile_inst) = NEW lcl_sdk_zipfile( i_op = 'install' i_version = s_target_version ).
-      DATA(wa_zipfile_uninst) = NEW lcl_sdk_zipfile( i_op = 'uninstall' i_version = s_target_version ).
-      sdk_zipfiles->add_pair( i_zipfile_inst   = wa_zipfile_inst
-                              i_zipfile_uninst = wa_zipfile_uninst ).
-      sdk_zipfiles->download_zipfile_pair( i_version = s_target_version ).
-
-    ELSE.
-      wa_zipfile_inst = sdk_zipfiles->get_by_op_version( i_op = 'install' i_version = s_target_version ).
-      wa_zipfile_uninst = sdk_zipfiles->get_by_op_version( i_op = 'uninstall' i_version = s_target_version ).
-    ENDIF.
-
-
+  METHOD lif_sdk_runner~run.
+    super->lif_sdk_runner~run( i_context = i_context ).
 
     WRITE / |In background mode| ##NO_TEXT.
     WRITE /.
 
     WRITE /.
-    WRITE / |Modules to be installed (transport file { wa_zipfile_inst->path }| ##NO_TEXT.
-    LOOP AT st_modules_to_be_installed ASSIGNING FIELD-SYMBOL(<fs_mod_inst>).
+    WRITE / |Modules to be installed (transport file { zipfile_inst->path }| ##NO_TEXT.
+    LOOP AT modules_to_be_installed ASSIGNING FIELD-SYMBOL(<fs_mod_inst>).
       WRITE <fs_mod_inst>-tla && | |.
     ENDLOOP.
 
     WRITE /.
-    WRITE / |to be deleted (transport file { wa_zipfile_uninst->path }| ##NO_TEXT.
-    LOOP AT st_modules_to_be_deleted ASSIGNING FIELD-SYMBOL(<fs_mod_dele>).
+    WRITE / |to be deleted (transport file { zipfile_uninst->path }| ##NO_TEXT.
+    LOOP AT modules_to_be_deleted ASSIGNING FIELD-SYMBOL(<fs_mod_dele>).
       WRITE / <fs_mod_dele>-tla && | |.
     ENDLOOP.
 
-    DATA lt_avail_modules_inst TYPE tt_sdk_module.
-    lt_avail_modules_inst = get_sdk_avail_modules_json(
-      i_operation = wa_zipfile_inst->op
-      i_source    = 'zip'
-      i_version   = wa_zipfile_inst->version
-    ).
-
-    LOOP AT st_modules_to_be_installed ASSIGNING FIELD-SYMBOL(<fs_module_to_be_installed>).
+    LOOP AT modules_to_be_installed ASSIGNING FIELD-SYMBOL(<fs_module_to_be_installed>).
       transport_manager->get_sdk_cofile_from_zip(
         EXPORTING
-          i_tla                   = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla
-          i_transport             = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
+          i_tla                   = avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla
+          i_transport             = avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
           i_operation             = 'install'
-          i_version               = s_target_version
-          i_zipfile_absolute_path = sdk_zipfiles->get_by_op_version( i_op = 'install' i_version = s_target_version )->path
+          i_version               = target_version
+          i_zipfile_absolute_path = zipfile_inst->path
         IMPORTING
           e_cofile_name           = DATA(l_cofile_name)
           e_cofile_blob           = DATA(l_cofile_blob) ).
 
-      WRITE / |Downloaded cofile | && lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport &&
-               | for TLA | && lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla ##NO_TEXT.
+      WRITE / |Downloaded cofile | && avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport &&
+               | for TLA | && avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla ##NO_TEXT.
 
       transport_manager->get_sdk_datafile_from_zip(
         EXPORTING
-          i_tla                   = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla
-          i_transport             = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
+          i_tla                   = avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla
+          i_transport             = avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport
           i_operation             = 'install'
-          i_version               = s_target_version
-          i_zipfile_absolute_path = sdk_zipfiles->get_by_op_version( i_op = 'install' i_version = s_target_version )->path
+          i_version               = target_version
+          i_zipfile_absolute_path = zipfile_inst->path
         IMPORTING
           e_datafile_name         = DATA(l_datafile_name)
           e_datafile_blob         = DATA(l_datafile_blob) ).
 
-      WRITE / |Downloaded data file | && lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport &&
-               | for TLA | && lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla ##NO_TEXT.
+      WRITE / |Downloaded data file | && avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport &&
+               | for TLA | && avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla ##NO_TEXT.
 
       transport_manager->write_sdk_transport_trdir(
         EXPORTING
@@ -3064,58 +3223,47 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
         RECEIVING
           r_success       = DATA(l_success_write) ).
 
-      WRITE / |Wrote cofile and datafile for transport | && lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport &&
-               | for TLA | && lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla && | successfully? -> | && l_success_write ##NO_TEXT.
+      WRITE / |Wrote cofile and datafile for transport | && avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport &&
+               | for TLA | && avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-tla && | successfully? -> | && l_success_write ##NO_TEXT.
 
 
-      INSERT VALUE stms_tr_request( trkorr = lt_avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport ) INTO TABLE lt_transport_list_inst.
+      INSERT VALUE stms_tr_request( trkorr = avail_modules_inst[ tla = <fs_module_to_be_installed>-tla ]-atransport ) INTO TABLE transport_list_inst.
     ENDLOOP.
-
 
     CALL METHOD transport_manager->import_sdk_transports
       EXPORTING
-        it_transport_names = lt_transport_list_inst
+        it_transport_names = transport_list_inst
       IMPORTING
-        e_tp_retcode       = l_tp_rc_inst
-        es_exception       = ls_exception_inst.
+        e_tp_retcode       = DATA(l_tp_rc_inst)
+        es_exception       = DATA(ls_exception_inst).
 
     WRITE / |Imported installation transport with tp return code: | && l_tp_rc_inst && |, message was: | && ls_exception_inst-error ##NO_TEXT.
 
 
-    DATA lt_avail_modules_uninst TYPE tt_sdk_module.
-    lt_avail_modules_uninst = get_sdk_avail_modules_json(
-      i_operation = wa_zipfile_uninst->op
-      i_source    = 'zip'
-      i_version   = wa_zipfile_uninst->version
-    ).
 
-
-    LOOP AT st_modules_to_be_deleted ASSIGNING FIELD-SYMBOL(<fs_module_to_be_deleted>).
-
+    LOOP AT modules_to_be_deleted ASSIGNING FIELD-SYMBOL(<fs_module_to_be_deleted>).
 
       transport_manager->get_sdk_cofile_from_zip(
         EXPORTING
-          i_tla                   = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-tla
-          i_transport             = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
+          i_tla                   = avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-tla
+          i_transport             = avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
           i_operation             = 'uninstall'
-          i_version               = s_target_version
-          i_zipfile_absolute_path = sdk_zipfiles->get_by_op_version( i_op = 'uninstall' i_version = s_target_version )->path
+          i_version               = target_version
+          i_zipfile_absolute_path = zipfile_uninst->path
         IMPORTING
           e_cofile_name           = DATA(l_uninstall_cofile_name)
           e_cofile_blob           = DATA(l_uninstall_cofile_blob) ).
 
-
       transport_manager->get_sdk_datafile_from_zip(
         EXPORTING
-          i_tla                   = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-tla
-          i_transport             = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
+          i_tla                   = avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-tla
+          i_transport             = avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport
           i_operation             = 'uninstall'
-          i_version               = s_target_version
-          i_zipfile_absolute_path = sdk_zipfiles->get_by_op_version( i_op = 'uninstall' i_version = s_target_version )->path
+          i_version               = target_version
+          i_zipfile_absolute_path = zipfile_uninst->path
         IMPORTING
           e_datafile_name         = DATA(l_uninstall_datafile_name)
           e_datafile_blob         = DATA(l_uninstall_datafile_blob) ).
-
 
       transport_manager->write_sdk_transport_trdir(
         EXPORTING
@@ -3126,27 +3274,33 @@ CLASS lcl_sdk_package_manager IMPLEMENTATION.
         RECEIVING
           r_success       = DATA(l_uninstall_success_write) ).
 
-      INSERT VALUE stms_tr_request( trkorr = lt_avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport ) INTO TABLE lt_transport_list_uninst.
+      INSERT VALUE stms_tr_request( trkorr = avail_modules_uninst[ tla = <fs_module_to_be_deleted>-tla ]-atransport ) INTO TABLE transport_list_uninst.
 
     ENDLOOP.
 
-
     CALL METHOD transport_manager->import_sdk_transports
       EXPORTING
-        it_transport_names = lt_transport_list_uninst
+        it_transport_names = transport_list_uninst
       IMPORTING
-        e_tp_retcode       = l_tp_rc_uninst
-        es_exception       = ls_exception_uninst.
+        e_tp_retcode       = DATA(l_tp_rc_uninst)
+        es_exception       = DATA(ls_exception_uninst).
 
     WRITE / |Imported uninstallation transports with tp return code: | && l_tp_rc_uninst && |, message was: | && ls_exception_uninst-error ##NO_TEXT.
 
-    DELETE FROM SHARED BUFFER indx(mi) ID 'MOD_INST'.
-    DELETE FROM SHARED BUFFER indx(md) ID 'MOD_DELE'.
-    DELETE FROM SHARED BUFFER indx(tv) ID 'TAR_VERS'.
+    r_result = NEW lcl_sdk_runner_result(
+      i_tp_rc_inst       = l_tp_rc_inst
+      i_exception_inst   = ls_exception_inst
+      i_tp_rc_uninst     = l_tp_rc_uninst
+      i_exception_uninst = ls_exception_uninst ).
 
   ENDMETHOD.
 
-
+  METHOD lif_sdk_runner~cleanup.
+    super->lif_sdk_runner~cleanup( i_context = i_context ).
+    DELETE FROM SHARED BUFFER indx(mi) ID 'MOD_INST'.
+    DELETE FROM SHARED BUFFER indx(md) ID 'MOD_DELE'.
+    DELETE FROM SHARED BUFFER indx(tv) ID 'TAR_VERS'.
+  ENDMETHOD.
 ENDCLASS.
 
 
@@ -3380,12 +3534,12 @@ CLASS lcl_ui_tree_controller DEFINITION FINAL CREATE PRIVATE.
       tree_controller TYPE REF TO lcl_ui_tree_controller.
 
     DATA:
-      package_manager TYPE REF TO lcl_sdk_package_manager,
-      job_manager     TYPE REF TO lif_sdk_job_manager.
+      module_manager TYPE REF TO lcl_sdk_module_manager,
+      job_manager    TYPE REF TO lif_sdk_job_manager.
 
     METHODS:
-      constructor IMPORTING i_package_manager TYPE REF TO lcl_sdk_package_manager OPTIONAL
-                            i_job_manager     TYPE REF TO lif_sdk_job_manager OPTIONAL
+      constructor IMPORTING i_module_manager TYPE REF TO lcl_sdk_module_manager OPTIONAL
+                            i_job_manager    TYPE REF TO lif_sdk_job_manager OPTIONAL
                   RAISING   lcx_error.
 
 ENDCLASS.
@@ -3424,7 +3578,7 @@ CLASS lcl_ui_selection_validator DEFINITION FINAL.
   PRIVATE SECTION.
     CLASS-DATA:
       tree_controller TYPE REF TO lcl_ui_tree_controller,
-      package_manager TYPE REF TO lcl_sdk_package_manager.
+      module_manager  TYPE REF TO lcl_sdk_module_manager.
 
 
 ENDCLASS.
@@ -3432,7 +3586,7 @@ ENDCLASS.
 CLASS lcl_ui_selection_validator IMPLEMENTATION.
 
   METHOD class_constructor.
-    package_manager = lcl_sdk_package_manager=>get_instance( i_batch_mode = sy-batch ).
+    module_manager = lcl_sdk_module_manager=>get_instance( ).
     tree_controller = lcl_ui_tree_controller=>get_instance( ).
   ENDMETHOD.
 
@@ -3466,23 +3620,23 @@ CLASS lcl_ui_selection_validator IMPLEMENTATION.
     DATA lv_text TYPE string.
     DATA lv_answer TYPE c.
 
-    DATA(package_manager) = lcl_sdk_package_manager=>get_instance( i_batch_mode = sy-batch ).
+    DATA(module_manager) = lcl_sdk_module_manager=>get_instance( ).
 
     CASE i_op.
 
       WHEN 'install'.
         DATA(lv_number_modules_inst) = lines( it_modules_tbi ).
         DATA(lv_number_new_modules) = 0.
-        DATA(lv_number_modules_avail_inst) = lines( package_manager->mt_available_modules_inst ).
+        DATA(lv_number_modules_avail_inst) = lines( module_manager->mt_available_modules_inst ).
 
         " determine modules to be net newly installed
         LOOP AT it_modules_tbi INTO DATA(wa_module_tbi).
-          IF ( wa_module_tbi-tla <> 'core' ) AND NOT line_exists( package_manager->mt_installed_modules[ tla = wa_module_tbi-tla ] ).
+          IF ( wa_module_tbi-tla <> 'core' ) AND NOT line_exists( module_manager->mt_installed_modules[ tla = wa_module_tbi-tla ] ).
             lv_number_new_modules = lv_number_new_modules + 1.
             lv_number_modules_inst = lv_number_modules_inst - 1.
           ENDIF.
 
-          IF ( wa_module_tbi-tla = 'core' ) AND ( NOT package_manager->is_core_installed( ) ).
+          IF ( wa_module_tbi-tla = 'core' ) AND ( NOT module_manager->is_core_installed( ) ).
             lv_number_new_modules = lv_number_new_modules + 1.
             lv_number_modules_inst = lv_number_modules_inst - 1.
           ENDIF.
@@ -3632,15 +3786,15 @@ CLASS lcl_ui_selection_validator IMPLEMENTATION.
 
       WHEN 'install'.
 
-        IF package_manager->is_core_installed( ) = abap_false                            " core is NOT installed
+        IF module_manager->is_core_installed( ) = abap_false                            " core is NOT installed
           AND NOT line_exists( it_modules_tbi[ tla = 'core' ] )  " and NOT selected for installation
           AND lines( it_modules_tbi ) > 0.                              " are other modules selected for installation?
           MESSAGE |Please install core module with first deployment.| TYPE 'S' DISPLAY LIKE 'E' ##NO_TEXT.
           lv_result = abap_false.                                       " then block the request
 
-        ELSEIF package_manager->is_core_installed( ) = abap_true                         " core is installed
+        ELSEIF module_manager->is_core_installed( ) = abap_true                         " core is installed
             AND line_exists( it_modules_tbd[ tla = 'core' ] )    " and marked for deletion
-            AND ( lines( it_modules_tbd ) < lines( package_manager->mt_installed_modules ) - 3    " are any installed modules NOT selected for deletion?
+            AND ( lines( it_modules_tbd ) < lines( module_manager->mt_installed_modules ) - 3    " are any installed modules NOT selected for deletion?
             OR lines( it_modules_tbi ) > 0 ).                                   " or did the user select additional modules for installation?
           MESSAGE |To delete core, additionally mark all installed modules for deletion.| TYPE 'S' DISPLAY LIKE 'E' ##NO_TEXT.
           lv_result = abap_false.                                       " then block the request
@@ -3651,9 +3805,9 @@ CLASS lcl_ui_selection_validator IMPLEMENTATION.
 
       WHEN 'uninstall'.
 
-        IF package_manager->is_core_installed( ) = abap_true                           " core is installed
+        IF module_manager->is_core_installed( ) = abap_true                           " core is installed
             AND line_exists( it_modules_tbd[ tla = 'core' ] )  " and marked for deletion
-            AND ( lines( it_modules_tbd ) < lines( package_manager->mt_installed_modules ) - 3 " are any installed modules NOT selected for deletion?
+            AND ( lines( it_modules_tbd ) < lines( module_manager->mt_installed_modules ) - 3 " are any installed modules NOT selected for deletion?
             OR lines( it_modules_tbi ) > 0 ).                                " or did the user select additional modules for installation?
           MESSAGE |To delete core, additionally mark all installed modules for deletion.| TYPE 'S' DISPLAY LIKE 'E' ##NO_TEXT.
           lv_result = abap_false.                                           " then block the request
@@ -3719,7 +3873,7 @@ CLASS lcl_ui_command_base DEFINITION ABSTRACT.
 
     METHODS:
       constructor IMPORTING i_tree_controller       TYPE REF TO lcl_ui_tree_controller OPTIONAL
-                            i_package_manager       TYPE REF TO lcl_sdk_package_manager OPTIONAL
+                            i_module_manager        TYPE REF TO lcl_sdk_module_manager OPTIONAL
                             i_internet_manager      TYPE REF TO lif_sdk_internet_manager OPTIONAL
                             i_certificate_manager   TYPE REF TO lif_sdk_certificate_manager OPTIONAL
                             i_job_manager           TYPE REF TO lif_sdk_job_manager OPTIONAL
@@ -3729,7 +3883,7 @@ CLASS lcl_ui_command_base DEFINITION ABSTRACT.
   PROTECTED SECTION.
     DATA:
       tree_controller       TYPE REF TO lcl_ui_tree_controller,
-      package_manager       TYPE REF TO lcl_sdk_package_manager,
+      module_manager        TYPE REF TO lcl_sdk_module_manager,
       internet_manager      TYPE REF TO lif_sdk_internet_manager,
       certificate_manager   TYPE REF TO lif_sdk_certificate_manager,
       job_manager           TYPE REF TO lif_sdk_job_manager,
@@ -3751,10 +3905,10 @@ CLASS lcl_ui_command_base IMPLEMENTATION.
       tree_controller = lcl_ui_tree_controller=>get_instance( ).
     ENDIF.
 
-    IF i_package_manager IS BOUND.
-      package_manager = i_package_manager.
+    IF i_module_manager IS BOUND.
+      module_manager = i_module_manager.
     ELSE.
-      package_manager = lcl_sdk_package_manager=>get_instance( i_batch_mode = sy-batch ).
+      module_manager = lcl_sdk_module_manager=>get_instance( ).
     ENDIF.
 
     IF i_internet_manager IS BOUND.
@@ -3798,9 +3952,9 @@ CLASS lcl_ui_command_base IMPLEMENTATION.
     ENDIF.
     " we only use the same version as core (given it is installed at all)
     " if the installed version of core is NOT the latest version
-    IF package_manager->is_core_installed( ) = abap_true.
-      IF NOT package_manager->is_version_latest( package_manager->mt_installed_modules[ tla = 'sts' ]-cvers ).
-        target_version = package_manager->mt_installed_modules[ tla = 'sts' ]-cvers.
+    IF module_manager->is_core_installed( ) = abap_true.
+      IF NOT module_manager->is_version_latest( module_manager->mt_installed_modules[ tla = 'sts' ]-cvers ).
+        target_version = module_manager->mt_installed_modules[ tla = 'sts' ]-cvers.
       ELSE.
         target_version = 'LATEST'.
       ENDIF.
@@ -3826,9 +3980,10 @@ ENDCLASS.
 
 CLASS lcl_ui_command_exe_dia IMPLEMENTATION.
   METHOD lif_ui_command~execute.
-    package_manager->run_foreground( i_modules_to_be_installed = tree_controller->mt_modules_to_be_installed
-                                     i_modules_to_be_deleted   = tree_controller->mt_modules_to_be_deleted
-                                     i_target_version          = get_target_version( ) ).
+    DATA(runner_dia) = NEW lcl_sdk_runner_foreground( i_zipfiles = module_manager->zipfiles ).
+    runner_dia->execute( i_context = NEW lcl_sdk_runner_context( i_modules_to_be_installed = tree_controller->mt_modules_to_be_installed
+                                                       i_modules_to_be_deleted   = tree_controller->mt_modules_to_be_deleted
+                                                       i_target_version          = get_target_version( ) ) ).
     tree_controller->refresh( ).
   ENDMETHOD.
 
@@ -3847,9 +4002,9 @@ CLASS lcl_ui_command_exe_dia IMPLEMENTATION.
     CHECK lines( tree_controller->mt_modules_to_be_installed ) > 0
       OR lines( tree_controller->mt_modules_to_be_deleted ) > 0
       OR lines( tree_controller->mt_modules_to_be_updated ) > 0.
-    CHECK package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
-    CHECK package_manager->update_zipfiles_if_outdated( i_avers_core_inst = package_manager->mt_available_modules_inst[ tla = 'core' ]-avers
-                            i_avers_core_uninst = package_manager->mt_available_modules_uninst[ tla = 'core' ]-avers ).
+    CHECK module_manager->zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
+    CHECK module_manager->update_zipfiles_if_outdated( i_avers_core_inst = module_manager->mt_available_modules_inst[ tla = 'core' ]-avers
+                            i_avers_core_uninst = module_manager->mt_available_modules_uninst[ tla = 'core' ]-avers ).
     r_result = abap_true.
   ENDMETHOD.
 
@@ -3893,9 +4048,9 @@ CLASS lcl_ui_command_exe_btc IMPLEMENTATION.
     CHECK lines( tree_controller->mt_modules_to_be_installed ) > 0
       OR lines( tree_controller->mt_modules_to_be_deleted ) > 0
       OR lines( tree_controller->mt_modules_to_be_updated ) > 0.
-    CHECK package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
-    CHECK package_manager->update_zipfiles_if_outdated( i_avers_core_inst = package_manager->mt_available_modules_inst[ tla = 'core' ]-avers
-                            i_avers_core_uninst = package_manager->mt_available_modules_uninst[ tla = 'core' ]-avers ).
+    CHECK module_manager->zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
+    CHECK module_manager->update_zipfiles_if_outdated( i_avers_core_inst = module_manager->mt_available_modules_inst[ tla = 'core' ]-avers
+                            i_avers_core_uninst = module_manager->mt_available_modules_uninst[ tla = 'core' ]-avers ).
     r_result = abap_true.
   ENDMETHOD.
 
@@ -3914,9 +4069,10 @@ ENDCLASS.
 
 CLASS lcl_ui_command_ins_dia IMPLEMENTATION.
   METHOD lif_ui_command~execute.
-    package_manager->run_foreground( i_modules_to_be_installed = tree_controller->mt_modules_to_be_installed
-                                     i_modules_to_be_deleted   = tree_controller->mt_modules_to_be_deleted
-                                     i_target_version          = get_target_version( ) ). " empty since modules tbd are not collected here
+    DATA(runner_dia) = NEW lcl_sdk_runner_foreground( i_zipfiles = module_manager->zipfiles ).
+    runner_dia->execute( i_context = NEW lcl_sdk_runner_context( i_modules_to_be_installed = tree_controller->mt_modules_to_be_installed
+                                                       i_modules_to_be_deleted   = tree_controller->mt_modules_to_be_deleted
+                                                       i_target_version          = get_target_version( ) ) ).
     tree_controller->refresh( ).
   ENDMETHOD.
   METHOD lif_ui_command~can_execute.
@@ -3928,7 +4084,7 @@ CLASS lcl_ui_command_ins_dia IMPLEMENTATION.
                                i_salv_function = 'INS_FGND'
                                i_op = 'install' ) = abap_false.
     CHECK lines( tree_controller->mt_modules_to_be_installed ) > 0.
-    CHECK package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
+    CHECK module_manager->zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
     r_result = abap_true.
   ENDMETHOD.
 ENDCLASS.
@@ -3959,7 +4115,7 @@ CLASS lcl_ui_command_ins_btc IMPLEMENTATION.
                                i_salv_function = 'INS_BGND'
                                i_op = 'install' ) = abap_false.
     CHECK lines( tree_controller->mt_modules_to_be_installed ) > 0.
-    CHECK package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
+    CHECK module_manager->zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
     r_result = abap_true.
   ENDMETHOD.
 ENDCLASS.
@@ -3975,9 +4131,10 @@ ENDCLASS.
 
 CLASS lcl_ui_command_del_dia IMPLEMENTATION.
   METHOD lif_ui_command~execute.
-    package_manager->run_foreground( i_modules_to_be_installed = tree_controller->mt_modules_to_be_installed " empty since modules tbi are not collected here
-                                     i_modules_to_be_deleted   = tree_controller->mt_modules_to_be_deleted
-                                     i_target_version          = get_target_version( ) ).
+    DATA(runner_dia) = NEW lcl_sdk_runner_foreground( i_zipfiles = module_manager->zipfiles ).
+    runner_dia->execute( i_context = NEW lcl_sdk_runner_context( i_modules_to_be_installed = tree_controller->mt_modules_to_be_installed
+                                                       i_modules_to_be_deleted   = tree_controller->mt_modules_to_be_deleted
+                                                       i_target_version          = get_target_version( ) ) ).
     tree_controller->refresh( ).
   ENDMETHOD.
 
@@ -3992,7 +4149,7 @@ CLASS lcl_ui_command_del_dia IMPLEMENTATION.
                                i_salv_function = 'DEL_FGND'
                                i_op = 'uninstall' ).
     CHECK lines( tree_controller->mt_modules_to_be_deleted ) > 0.
-    CHECK package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
+    CHECK module_manager->zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
     r_result = abap_true.
   ENDMETHOD.
 ENDCLASS.
@@ -4024,7 +4181,7 @@ CLASS lcl_ui_command_del_btc IMPLEMENTATION.
                                                        i_salv_function = 'DEL_BGND'
                                                        i_op = 'uninstall' ).
     CHECK lines( tree_controller->mt_modules_to_be_deleted ) > 0.
-    CHECK package_manager->sdk_zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
+    CHECK module_manager->zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
     r_result = abap_true.
   ENDMETHOD.
 ENDCLASS.
@@ -4117,8 +4274,8 @@ ENDCLASS.
 
 CLASS lcl_ui_command_ins_all IMPLEMENTATION.
   METHOD lif_ui_command~execute.
-    DATA(job_number) = package_manager->install_all_modules( it_modules_to_be_installed = tree_controller->mt_modules_to_be_installed
-                                                             it_modules_to_be_deleted   = tree_controller->mt_modules_to_be_deleted ).
+    DATA(job_number) = module_manager->install_all_modules( it_modules_to_be_installed = tree_controller->mt_modules_to_be_installed
+                                                            it_modules_to_be_deleted   = tree_controller->mt_modules_to_be_deleted ).
     lcl_ui_utils=>display_job_submitted_message( i_job_number = job_number ).
     tree_controller->refresh( ).
   ENDMETHOD.
@@ -4220,7 +4377,7 @@ ENDCLASS.
 
 CLASS lcl_ui_command_dow_trk IMPLEMENTATION.
   METHOD lif_ui_command~execute.
-    package_manager->sdk_zipfiles->download_zipfile_pair( i_version = 'LATEST' ).
+    module_manager->zipfiles->download_zipfile_pair( i_version = 'LATEST' ).
   ENDMETHOD.
 
   METHOD lif_ui_command~can_execute.
@@ -4281,10 +4438,10 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
   METHOD constructor.
 
-    IF i_package_manager IS BOUND.
-      package_manager = i_package_manager.
+    IF i_module_manager IS BOUND.
+      module_manager = i_module_manager.
     ELSE.
-      package_manager = lcl_sdk_package_manager=>get_instance( i_batch_mode = sy-batch ).
+      module_manager = lcl_sdk_module_manager=>get_instance( ).
     ENDIF.
 
     IF i_job_manager IS BOUND.
@@ -4297,7 +4454,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
   " WARNING: THIS NEEDS TO STAY SEPARATE FROM THE CONSTRUCTOR OR THE FM CALL IN CREATE_CONTAINER BREAKS THE SINGLETON
   METHOD init.
-    SELECT tla FROM @package_manager->mt_available_modules_inst AS am WHERE is_popular = 'X' INTO TABLE @mt_popular_modules .
+    SELECT tla FROM @module_manager->mt_available_modules_inst AS am WHERE is_popular = 'X' INTO TABLE @mt_popular_modules .
 
     " re-hydrate the module staging area if report is restarted
     IMPORT st_modules_to_be_installed = mt_modules_to_be_installed FROM SHARED BUFFER indx(mi) ID 'MOD_INST'.
@@ -4518,26 +4675,26 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
                    ir_node_key  = lr_key ).
 
     DATA wa_core_module TYPE ts_sdk_module.
-    READ TABLE package_manager->mt_installed_modules WITH KEY tla = 'sts' INTO wa_core_module. " core module installed?
+    READ TABLE module_manager->mt_installed_modules WITH KEY tla = 'sts' INTO wa_core_module. " core module installed?
     IF sy-subrc <> 0.
 
     ENDIF.
 
     wa_core_module-tla = 'core'.
     wa_core_module-name = 'AWS SDK for SAP ABAP core [s3, smr, rla, sts]' ##NO_TEXT.
-    wa_core_module-avers = package_manager->mt_available_modules_inst[ tla = 'core' ]-avers.
-    wa_core_module-atransport = package_manager->mt_available_modules_inst[ tla = 'core' ]-atransport.
+    wa_core_module-avers = module_manager->mt_available_modules_inst[ tla = 'core' ]-avers.
+    wa_core_module-atransport = module_manager->mt_available_modules_inst[ tla = 'core' ]-atransport.
 
 
 
     IF wa_core_module-cvers IS NOT INITIAL.
 
-      IF lcl_sdk_utils=>cmp_version_string( i_string1 = package_manager->mt_available_modules_inst[ tla = 'core' ]-avers
+      IF lcl_sdk_utils=>cmp_version_string( i_string1 = module_manager->mt_available_modules_inst[ tla = 'core' ]-avers
                                                     i_string2 = wa_core_module-cvers ) = 0.
         wa_core_module-op_icon = '@08@'.
         wa_core_module-op_text = 'Module up to date, no operation planned.' ##NO_TEXT.
         wa_core_module-op_code = lif_ui_constants=>c_operation_none.
-      ELSEIF lcl_sdk_utils=>cmp_version_string( i_string1 = package_manager->mt_available_modules_inst[ tla = 'core' ]-avers
+      ELSEIF lcl_sdk_utils=>cmp_version_string( i_string1 = module_manager->mt_available_modules_inst[ tla = 'core' ]-avers
                                                         i_string2 = wa_core_module-cvers ) = 1.
         wa_core_module-op_icon = '@09@'.
         wa_core_module-op_text = 'Module will be updated.' ##NO_TEXT.
@@ -4567,11 +4724,11 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
       " is_core_installed( ) does not always work here as not all 4 core modules might
       " be fully present yet during an installation run
-      IF package_manager->is_core_installed( ) = abap_false
+      IF module_manager->is_core_installed( ) = abap_false
        OR wa_core_module-cvers IS NOT INITIAL
        AND line_exists( mt_modules_to_be_installed[ tla = 'core' ] ).
         wa_core_module-op_text = 'Installation operation in progress.' ##NO_TEXT.
-      ELSEIF package_manager->is_core_installed( ) = abap_true
+      ELSEIF module_manager->is_core_installed( ) = abap_true
         OR wa_core_module-cvers IS INITIAL
         AND line_exists( mt_modules_to_be_deleted[ tla = 'core' ] ).
         wa_core_module-op_text = 'Delete operation in progress.' ##NO_TEXT.
@@ -4612,16 +4769,16 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 *      lr_item->set_editable( abap_true ).
 *    ENDIF.
 
-    IF package_manager->is_core_installed( ) = abap_true  " core installed and should be updated
+    IF module_manager->is_core_installed( ) = abap_true  " core installed and should be updated
      AND line_exists( mt_modules_to_be_installed[ tla = 'core' ] ).
       lr_item->set_checked( abap_true ).
-    ELSEIF package_manager->is_core_installed( ) = abap_true  " core installed and should be deleted
+    ELSEIF module_manager->is_core_installed( ) = abap_true  " core installed and should be deleted
       AND line_exists( mt_modules_to_be_deleted[ tla = 'core' ] ).
       lr_item->set_checked( abap_false ).
-    ELSEIF package_manager->is_core_installed( ) = abap_true   " core installed and should NOT be updated
+    ELSEIF module_manager->is_core_installed( ) = abap_true   " core installed and should NOT be updated
       AND NOT line_exists( mt_modules_to_be_installed[ tla = 'core' ] ).
       lr_item->set_checked( abap_true ).
-    ELSEIF NOT package_manager->is_core_installed( ) = abap_true   " core NOT installed and should be installed
+    ELSEIF NOT module_manager->is_core_installed( ) = abap_true   " core NOT installed and should be installed
       AND line_exists( mt_modules_to_be_installed[ tla = 'core' ] ).
       lr_item->set_checked( abap_true ).
     ELSE.
@@ -4635,24 +4792,26 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
   ENDMETHOD.
 
-
   METHOD draw_node_installed_modules.
 
-    DATA: lr_nodes TYPE REF TO cl_salv_nodes,
-          lr_node  TYPE REF TO cl_salv_node,
-          lr_item  TYPE REF TO cl_salv_item,
-          l_text   TYPE lvc_value,
-          lr_key   TYPE salv_de_node_key.
+    DATA: lr_nodes               TYPE REF TO cl_salv_nodes,
+          lr_node                TYPE REF TO cl_salv_node,
+          lr_deprecated_mod_node TYPE REF TO cl_salv_node,
+          lr_item                TYPE REF TO cl_salv_item,
+          l_text                 TYPE lvc_value,
+          lr_deprecated_mod_key  TYPE salv_de_node_key,
+          lr_key                 TYPE salv_de_node_key.
 
 
     lr_nodes = mr_tree->get_nodes( ).
 
     " TODO: returning the no of modules (installed, available) should go into a dedicated function.
-    DATA(l_inst_mod_no) = lines( package_manager->mt_installed_modules ).
+    DATA(l_inst_mod_no) = lines( module_manager->mt_installed_modules ).
     IF l_inst_mod_no >= 4.
       l_inst_mod_no = l_inst_mod_no - 3.
     ENDIF.
 
+    " ------ Installed modules parent folder
     DATA(l_installed_modules_text) = 'Installed ABAP SDK Modules (' && l_inst_mod_no && ')' ##NO_TEXT.
     DATA(l_installed_modules_lvc) = CONV lvc_value( l_installed_modules_text ).
 
@@ -4669,7 +4828,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
 
 
-    IF lines( package_manager->mt_installed_modules ) > 0.
+    IF lines( module_manager->mt_installed_modules ) > 0.
       TRY.
           lr_node->expand( ).
         CATCH cx_salv_msg.
@@ -4687,15 +4846,43 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
                    ir_node_key  = lr_key ).
 
 
+    " ------ Installed modules subfolder Deprecated Modules
+    DATA(deprecated_modules_no) = lines( module_manager->mt_deprecated_modules ).
+    IF deprecated_modules_no > 0.
+      DATA(l_deprecated_modules_text) = 'Deprecated Modules (' && deprecated_modules_no && ')' ##NO_TEXT.
+      DATA(l_deprecated_modules_lvc) = CONV lvc_value( l_deprecated_modules_text ).
+      TRY.
+          lr_nodes->add_node( EXPORTING related_node = lr_key
+                                        relationship = cl_gui_column_tree=>relat_last_child
+                                        text         = l_deprecated_modules_lvc
+                                        folder       = abap_true
+                                        expander     = abap_true
+                              RECEIVING node         = lr_deprecated_mod_node ).
+        CATCH cx_salv_msg.
+      ENDTRY.
 
-    SORT package_manager->mt_installed_modules BY tla.
+      IF m_available_modules_expanded = abap_false.
+        TRY.
+            lr_deprecated_mod_node->expand( ).
+          CATCH cx_salv_msg.
+        ENDTRY.
+      ENDIF.
+
+      lr_deprecated_mod_key = lr_deprecated_mod_node->get_key( ).
+
+      save_node_key( ir_node_name = |deprecated_modules|
+                     ir_node_key  = lr_key ).
+    ENDIF.
+
+    "------ Module list compilation
+    SORT module_manager->mt_installed_modules BY tla.
 
     DATA wa_installed_module TYPE ts_sdk_module.
 
-    LOOP AT package_manager->mt_installed_modules INTO wa_installed_module.
+    LOOP AT module_manager->mt_installed_modules INTO wa_installed_module.
 
       " Skip modules that are part of AWS_CORE
-      IF package_manager->is_module_core( wa_installed_module-tla ).
+      IF module_manager->is_module_core( wa_installed_module-tla ).
 
         CONTINUE.
 
@@ -4703,8 +4890,8 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
 
 
-        wa_installed_module-avers = VALUE #( package_manager->mt_available_modules_inst[ tla = wa_installed_module-tla ]-avers DEFAULT 'n.a.' ).
-        wa_installed_module-atransport = VALUE #( package_manager->mt_available_modules_inst[ tla = wa_installed_module-tla ]-atransport DEFAULT 'n.a.' ).
+        wa_installed_module-avers = VALUE #( module_manager->mt_available_modules_inst[ tla = wa_installed_module-tla ]-avers DEFAULT 'n.a.' ).
+        wa_installed_module-atransport = VALUE #( module_manager->mt_available_modules_inst[ tla = wa_installed_module-tla ]-atransport DEFAULT 'n.a.' ).
 
         l_text = wa_installed_module-tla.
 
@@ -4746,11 +4933,19 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
 
         TRY.
-            lr_nodes->add_node( EXPORTING related_node = lr_key
-                                          relationship = cl_gui_column_tree=>relat_last_child
-                                          data_row     = wa_installed_module
-                                          text         = l_text
-                                RECEIVING node         = lr_node ).
+            IF line_exists( module_manager->mt_deprecated_modules[ tla = wa_installed_module-tla ] ).
+              lr_nodes->add_node( EXPORTING related_node = lr_deprecated_mod_key
+                                            relationship = cl_gui_column_tree=>relat_last_child
+                                            data_row     = wa_installed_module
+                                            text         = l_text
+                                  RECEIVING node         = lr_node ).
+            ELSE.
+              lr_nodes->add_node( EXPORTING related_node = lr_key
+                                            relationship = cl_gui_column_tree=>relat_last_child
+                                            data_row     = wa_installed_module
+                                            text         = l_text
+                                  RECEIVING node         = lr_node ).
+            ENDIF.
           CATCH cx_salv_msg.
         ENDTRY.
 
@@ -4799,14 +4994,14 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
     lr_nodes = mr_tree->get_nodes( ).
 
-    DATA(l_inst_mod_no) = lines( package_manager->mt_installed_modules ).
+    DATA(l_inst_mod_no) = lines( module_manager->mt_installed_modules ).
     IF l_inst_mod_no >= 4.
       l_inst_mod_no = l_inst_mod_no - 3.
     ENDIF.
-    DATA(l_inst_deprecated_mod_ins_no) = lines( package_manager->get_sdk_deprecated_mod_inst( ) ).
-    DATA(l_avail_modules_no) = lines( package_manager->mt_available_modules_inst ) - ( l_inst_mod_no - l_inst_deprecated_mod_ins_no ).
+    DATA(l_inst_deprecated_mod_ins_no) = lines( module_manager->get_sdk_deprecated_modules( ) ).
+    DATA(l_avail_modules_no) = lines( module_manager->mt_available_modules_inst ) - ( l_inst_mod_no - l_inst_deprecated_mod_ins_no ).
 
-    IF lines( package_manager->mt_installed_modules ) = 0.
+    IF lines( module_manager->mt_installed_modules ) = 0.
       l_avail_modules_no = l_avail_modules_no - 4.
     ENDIF.
 
@@ -4837,7 +5032,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
                    ir_node_key  = lr_key ) ##NO_TEXT.
 
     "------ Available Modules subfolder Popular Modules
-    DATA(l_popular_modules_no) = lines( mt_popular_modules ) - lines( FILTER #( package_manager->mt_installed_modules IN mt_popular_modules WHERE tla = tla ) ).
+    DATA(l_popular_modules_no) = lines( mt_popular_modules ) - lines( FILTER #( module_manager->mt_installed_modules IN mt_popular_modules WHERE tla = tla ) ).
     DATA(l_popular_modules_text) = 'Popular Modules (' && l_popular_modules_no && ')' ##NO_TEXT.
     DATA(l_popular_modules_lvc) = CONV lvc_value( l_popular_modules_text ).
 
@@ -4882,11 +5077,11 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
 
     "------ Module list compilation
-    SORT package_manager->mt_available_modules_inst BY tla.
+    SORT module_manager->mt_available_modules_inst BY tla.
 
     DATA wa_installed_module TYPE ts_sdk_module.
 
-    LOOP AT package_manager->mt_available_modules_inst ASSIGNING FIELD-SYMBOL(<fs_available_module>).
+    LOOP AT module_manager->mt_available_modules_inst ASSIGNING FIELD-SYMBOL(<fs_available_module>).
       CLEAR: lr_node.
 
       IF <fs_available_module>-tla = 'core'.
@@ -4895,7 +5090,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
       ELSE.
         CLEAR wa_installed_module.
-        READ TABLE package_manager->mt_installed_modules WITH KEY tla = <fs_available_module>-tla INTO wa_installed_module.
+        READ TABLE module_manager->mt_installed_modules WITH KEY tla = <fs_available_module>-tla INTO wa_installed_module.
         IF sy-subrc = 0.
           CONTINUE. " Module is already installed, skipping...
 
@@ -4957,16 +5152,6 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
             lr_item->set_checked( abap_false ).
           ENDIF.
           lr_item->set_editable( abap_true ).
-
-*          IF is_core_installed( ) = abap_true.
-*
-*            lr_item->set_editable( abap_true ).
-*
-*          ELSE.
-*
-*            lr_item->set_editable( abap_false ).
-*
-*          ENDIF.
 
         ENDIF.
       ENDIF.
@@ -5052,15 +5237,15 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
   METHOD refresh.
 
-    package_manager->mt_installed_modules = package_manager->get_sdk_installed_modules( ).
+    module_manager->mt_installed_modules = module_manager->get_sdk_installed_modules( ).
 
-    package_manager->mt_available_modules_inst = package_manager->get_sdk_avail_modules_json( i_operation = 'install'
+    module_manager->mt_available_modules_inst = module_manager->get_sdk_avail_modules_json( i_operation = 'install'
+                                                                                            i_source    = 'web'
+                                                                                            i_version   = 'LATEST' ).
+
+    module_manager->mt_available_modules_uninst = module_manager->get_sdk_avail_modules_json( i_operation = 'uninstall'
                                                                                               i_source    = 'web'
                                                                                               i_version   = 'LATEST' ).
-
-    package_manager->mt_available_modules_uninst = package_manager->get_sdk_avail_modules_json( i_operation = 'uninstall'
-                                                                                                i_source    = 'web'
-                                                                                                i_version   = 'LATEST' ).
 
 
     IF NOT job_manager->is_job_running( ).
@@ -5158,7 +5343,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
           lr_functions->enable_function( name    = 'BTC_DTLS'
                                          boolean = ' ' ).
 
-          IF lines( package_manager->mt_installed_modules ) > 4.  " if core is installed, activate the select/deslected buttons
+          IF lines( module_manager->mt_installed_modules ) > 4.  " if core is installed, activate the select/deslected buttons
             lr_functions->enable_function( name    = 'UPD_INST'
                                            boolean = 'X' ).
             lr_functions->enable_function( name    = 'DES_INST'
@@ -5208,7 +5393,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
     lr_settings->set_hierarchy_header( 'Modules' ) ##NO_TEXT.
 
     IF lcl_ui_utils=>is_fullscreen( i_container = mr_container ).
-      lr_settings->set_header( 'AWS ABAP SDK package control (fullscreen)' ) ##NO_TEXT.
+      lr_settings->set_header( 'AWS ABAP SDK module control (fullscreen)' ) ##NO_TEXT.
     ENDIF.
 
   ENDMETHOD.
@@ -5368,7 +5553,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
   METHOD create_container.
 
-    DATA(title) = |ABAP SDK Package Manager (v{ lif_global_constants=>gc_version })| ##NO_TEXT.
+    DATA(title) = |ABAP SDK Module Manager (v{ lif_global_constants=>gc_version })| ##NO_TEXT.
 
     CALL FUNCTION 'SALV_CSQT_CREATE_CONTAINER'
       EXPORTING
@@ -5401,7 +5586,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
             AND CAST string( <fs_node>-node->get_item( 'OP_CODE' )->get_value( ) )->* = lif_ui_constants=>c_operation_install.
 
             DATA(tla) = <fs_node>-node->get_text( ).
-            IF package_manager->is_module_core( CONV #( tla ) ).
+            IF module_manager->is_module_core( CONV #( tla ) ).
               tla = 'core'.
             ENDIF.
             CHECK NOT line_exists( rt_modules_to_be_installed[  tla = tla ] ).
@@ -5438,7 +5623,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
           AND CAST string( <fs_node>-node->get_item( 'OP_CODE' )->get_value( ) )->* = lif_ui_constants=>c_operation_delete.
 
             DATA(tla) = <fs_node>-node->get_text( ).
-            IF package_manager->is_module_core( CONV #( tla ) ).
+            IF module_manager->is_module_core( CONV #( tla ) ).
               tla = 'core'.
             ENDIF.
             CHECK NOT line_exists( rt_modules_to_be_deleted[ tla = tla ] ).
@@ -5478,7 +5663,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
             AND CAST string( <fs_node>-node->get_item( 'OP_CODE' )->get_value( ) )->* = lif_ui_constants=>c_operation_update.
 
             DATA(tla) = <fs_node>-node->get_text( ).
-            IF package_manager->is_module_core( CONV #( tla ) ).
+            IF module_manager->is_module_core( CONV #( tla ) ).
               tla = 'core'.
             ENDIF.
             INSERT VALUE ts_sdk_tla( tla = tla version = i_target_version ) INTO TABLE rt_modules_to_be_updated.
@@ -5525,15 +5710,15 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
         WHEN abap_true.
 
-          IF package_manager->is_core_installed( ) = abap_false.
+          IF module_manager->is_core_installed( ) = abap_false.
             wa_row-op_text = 'Will be installed.' ##NO_TEXT.
             wa_row-op_icon = '@08@'.
             wa_row-op_code = lif_ui_constants=>c_operation_install.
             l_node->set_data_row( wa_row ).
 
           ELSE.
-            IF lcl_sdk_utils=>cmp_version_string( i_string1 = package_manager->mt_installed_modules[ tla = 'sts' ]-avers
-                                                          i_string2 = package_manager->mt_installed_modules[ tla = 'sts' ]-cvers ) = 1.
+            IF lcl_sdk_utils=>cmp_version_string( i_string1 = module_manager->mt_installed_modules[ tla = 'sts' ]-avers
+                                                          i_string2 = module_manager->mt_installed_modules[ tla = 'sts' ]-cvers ) = 1.
               wa_row-op_text = 'Module will be updated.' ##NO_TEXT.
               wa_row-op_icon = '@09@'.
               wa_row-op_code = lif_ui_constants=>c_operation_update.
@@ -5548,7 +5733,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
         WHEN abap_false.
 
-          IF package_manager->is_core_installed( ) = abap_true.
+          IF module_manager->is_core_installed( ) = abap_true.
             wa_row-op_text = 'Will be deleted.' ##NO_TEXT.
             wa_row-op_icon = '@0A@'.
             wa_row-op_code = lif_ui_constants=>c_operation_delete.
@@ -5571,21 +5756,21 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
         WHEN abap_true.
 
-          IF VALUE #( package_manager->mt_installed_modules[ tla = l_tla ] OPTIONAL ) IS INITIAL .
+          IF VALUE #( module_manager->mt_installed_modules[ tla = l_tla ] OPTIONAL ) IS INITIAL .
             wa_row-op_text = 'Will be installed.' ##NO_TEXT.
             wa_row-op_icon = '@08@'.
             wa_row-op_code = lif_ui_constants=>c_operation_install.
             l_node->set_data_row( wa_row ).
 
           ELSE.
-            IF lcl_sdk_utils=>cmp_version_string( i_string1 = package_manager->mt_installed_modules[ tla = l_tla ]-avers
-                                                          i_string2 = package_manager->mt_installed_modules[ tla = l_tla ]-cvers ) = 1.
+            IF lcl_sdk_utils=>cmp_version_string( i_string1 = module_manager->mt_installed_modules[ tla = l_tla ]-avers
+                                                          i_string2 = module_manager->mt_installed_modules[ tla = l_tla ]-cvers ) = 1.
               wa_row-op_text = 'Module will be updated.' ##NO_TEXT.
               wa_row-op_icon = '@09@' ##NO_TEXT.
               wa_row-op_code = lif_ui_constants=>c_operation_update.
               l_node->set_data_row( wa_row ).
-            ELSEIF lcl_sdk_utils=>cmp_version_string( i_string1 = package_manager->mt_installed_modules[ tla = l_tla ]-avers
-                                                          i_string2 = package_manager->mt_installed_modules[ tla = l_tla ]-cvers ) = 0.
+            ELSEIF lcl_sdk_utils=>cmp_version_string( i_string1 = module_manager->mt_installed_modules[ tla = l_tla ]-avers
+                                                          i_string2 = module_manager->mt_installed_modules[ tla = l_tla ]-cvers ) = 0.
               wa_row-op_text = 'Module up to date, no operation planned.' ##NO_TEXT.
               wa_row-op_icon = '@08@' ##NO_TEXT.
               wa_row-op_code = lif_ui_constants=>c_operation_none.
@@ -5601,7 +5786,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
         WHEN abap_false.
 
-          IF VALUE #( package_manager->mt_installed_modules[ tla = l_tla ] OPTIONAL ) IS NOT INITIAL.
+          IF VALUE #( module_manager->mt_installed_modules[ tla = l_tla ] OPTIONAL ) IS NOT INITIAL.
             wa_row-op_text = 'Will be deleted.' ##NO_TEXT.
             wa_row-op_icon = '@0A@'.
             wa_row-op_code = lif_ui_constants=>c_operation_delete.
@@ -5732,7 +5917,7 @@ CLASS lcl_ui_tree_controller IMPLEMENTATION.
 
   METHOD toggle_inst_modules.
 
-    IF lines( package_manager->mt_installed_modules ) > 0.
+    IF lines( module_manager->mt_installed_modules ) > 0.
 
       TRY.
           DATA(lr_inst_mods_nodes) = mr_tree->get_nodes( )->get_node( node_key = mt_folder_node_keys[ node_name = 'installed_modules' ]-key )->get_children( ).
@@ -5770,7 +5955,7 @@ CLASS lcl_sdk_installer DEFINITION FINAL CREATE PRIVATE.
       sdk_installer TYPE REF TO lcl_sdk_installer.
 
     DATA:
-      package_manager     TYPE REF TO lcl_sdk_package_manager,
+      module_manager      TYPE REF TO lcl_sdk_module_manager,
       tree_controller     TYPE REF TO lcl_ui_tree_controller,
       internet_manager    TYPE REF TO lif_sdk_internet_manager,
       certificate_manager TYPE REF TO lif_sdk_certificate_manager.
@@ -5808,7 +5993,8 @@ CLASS lcl_sdk_installer IMPLEMENTATION.
         retrieve_missing_certificates( ).
 
         IF sy-batch = abap_true.
-          package_manager = lcl_sdk_package_manager=>get_instance( i_batch_mode = abap_true ). " TODO: Refactor to use a runner, not package manager
+          DATA(runner_btc) = NEW lcl_sdk_runner_background( ).
+          runner_btc->execute( i_context = NEW lcl_sdk_runner_context( ) ).
         ELSE.
           tree_controller = lcl_ui_tree_controller=>get_instance( ).
           tree_controller->init( ). " Needs separate initialization due to SALV handling, see comment on the method implementation
