@@ -82,9 +82,9 @@ CLASS lcx_error DEFINITION DEFERRED.
 
 INTERFACE lif_global_constants.
   CONSTANTS:
-    gc_version TYPE string VALUE '1.2.4' ##NO_TEXT,
-    gc_commit  TYPE string VALUE '860bea5' ##NO_TEXT,
-    gc_date    TYPE string VALUE '2025-11-15 17:03:53 UTC' ##NO_TEXT,
+    gc_version            TYPE string VALUE '1.2.4' ##NO_TEXT,
+    gc_commit             TYPE string VALUE '860bea5' ##NO_TEXT,
+    gc_date               TYPE string VALUE '2025-11-15 17:03:53 UTC' ##NO_TEXT,
     gc_url_github_version TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/version.txt'  ##NO_TEXT,
     gc_url_github_raw     TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/%23awslabs%23sdk_installer.prog.abap'  ##NO_TEXT.
 ENDINTERFACE.
@@ -2371,9 +2371,6 @@ CLASS lcl_sdk_module_manager IMPLEMENTATION.
 
     mt_installed_modules = get_sdk_installed_modules( ).
 
-    mt_deprecated_modules = get_sdk_deprecated_modules( ).
-
-
     mt_available_modules_inst = get_sdk_avail_modules_json( i_operation = 'install'
                                                             i_source    = 'web'
                                                             i_version   = 'LATEST' ) ##NO_TEXT.
@@ -2381,6 +2378,12 @@ CLASS lcl_sdk_module_manager IMPLEMENTATION.
     mt_available_modules_uninst = get_sdk_avail_modules_json( i_operation = 'uninstall'
                                                               i_source    = 'web'
                                                               i_version   = 'LATEST' ) ##NO_TEXT.
+
+    " needs available modules to be populated first
+    mt_deprecated_modules = get_sdk_deprecated_modules( ).
+
+
+
 
   ENDMETHOD.
 
@@ -2638,7 +2641,7 @@ CLASS lcl_sdk_module_manager IMPLEMENTATION.
   ENDMETHOD.
 
 
-
+  " TODO: Somehow non deprecated modules end up in here
   METHOD get_sdk_deprecated_modules.
 
     TRY.
@@ -2647,14 +2650,9 @@ CLASS lcl_sdk_module_manager IMPLEMENTATION.
     ENDTRY.
 
     LOOP AT lt_installed_modules INTO DATA(wa_inst).
-      IF is_module_core( wa_inst-tla ).
-        CONTINUE.
-      ELSE.
-        READ TABLE mt_available_modules_inst WITH KEY tla = wa_inst-tla TRANSPORTING NO FIELDS.
-        IF sy-subrc <> 0.
-          APPEND VALUE #( tla = wa_inst-tla ) TO r_deprecated_modules.
-        ENDIF.
-      ENDIF.
+      CHECK NOT is_module_core( wa_inst-tla ).
+      CHECK NOT line_exists( mt_available_modules_inst[ tla = wa_inst-tla ] ).
+      APPEND VALUE #( tla = wa_inst-tla ) TO r_deprecated_modules.
     ENDLOOP.
 
   ENDMETHOD.
@@ -4082,7 +4080,7 @@ CLASS lcl_ui_command_ins_dia IMPLEMENTATION.
     CHECK lcl_ui_selection_validator=>validate_selection( it_modules_tbi = tree_controller->mt_modules_to_be_installed
                                it_modules_tbd = tree_controller->mt_modules_to_be_deleted
                                i_salv_function = 'INS_FGND'
-                               i_op = 'install' ) = abap_false.
+                               i_op = 'install' ).
     CHECK lines( tree_controller->mt_modules_to_be_installed ) > 0.
     CHECK module_manager->zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
     r_result = abap_true.
@@ -4113,7 +4111,7 @@ CLASS lcl_ui_command_ins_btc IMPLEMENTATION.
     CHECK lcl_ui_selection_validator=>validate_selection( it_modules_tbi = tree_controller->mt_modules_to_be_installed
                                it_modules_tbd = tree_controller->mt_modules_to_be_deleted
                                i_salv_function = 'INS_BGND'
-                               i_op = 'install' ) = abap_false.
+                               i_op = 'install' ).
     CHECK lines( tree_controller->mt_modules_to_be_installed ) > 0.
     CHECK module_manager->zipfiles->ensure_zipfiles_downloaded( i_version = get_target_version( ) ).
     r_result = abap_true.
