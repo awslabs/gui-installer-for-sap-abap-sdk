@@ -82,9 +82,9 @@ CLASS lcx_error DEFINITION DEFERRED.
 
 INTERFACE lif_global_constants.
   CONSTANTS:
-    gc_version TYPE string VALUE '1.2.7' ##NO_TEXT,
-    gc_commit  TYPE string VALUE '80be734' ##NO_TEXT,
-    gc_date    TYPE string VALUE '2025-11-16 19:53:27 UTC' ##NO_TEXT,
+    gc_version            TYPE string VALUE '1.2.7' ##NO_TEXT,
+    gc_commit             TYPE string VALUE '80be734' ##NO_TEXT,
+    gc_date               TYPE string VALUE '2025-11-16 19:53:27 UTC' ##NO_TEXT,
     gc_url_github_version TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/version.txt'  ##NO_TEXT,
     gc_url_github_raw     TYPE w3_url VALUE 'https://raw.githubusercontent.com/awslabs/gui-installer-for-sap-abap-sdk/refs/heads/main/src/%23awslabs%23sdk_installer.prog.abap'  ##NO_TEXT.
 ENDINTERFACE.
@@ -647,8 +647,8 @@ INTERFACE lif_sdk_certificate_manager.
 
   METHODS:
 
-    install_certs changing ct_certificates TYPE tt_certificate
-                  RAISING   lcx_error,
+    install_certs CHANGING ct_certificates TYPE tt_certificate
+                  RAISING  lcx_error,
     get_missing_certs IMPORTING it_certificates   TYPE tt_certificate
                       RETURNING VALUE(rt_missing) TYPE tt_certificate,
     is_cert_installed IMPORTING i_subject       TYPE string
@@ -771,19 +771,33 @@ CLASS lcl_sdk_certificate_manager IMPLEMENTATION.
                     uri = 'https://www.amazontrust.com/repository/SFSRootCAG2.cer'
                     binary = ''
                     installed = abap_false ) INTO me->amazon_root_certs_https INDEX 5 ##NO_TEXT.
+
+    " The following certificates are pending inclusion in browser trust stores.
+    INSERT VALUE #( subject = 'CN=Amazon RSA 2048 Root EU M1, O=Amazon, C=DE'
+                    uri = 'https://www.amazontrust.com/repository/Amazon-RSA-2048-Root-EU-M1-Self-Signed.cer'
+                    binary = ''
+                    installed = abap_false ) INTO me->amazon_root_certs_https INDEX 6 ##NO_TEXT.
+    INSERT VALUE #( subject = 'CN=Amazon ECDSA 256 Root EU M1, O=Amazon, C=DE'
+                    uri = 'https://www.amazontrust.com/repository/Amazon-ECDSA-256-Root-EU-M1-Self-Signed.cer'
+                    binary = ''
+                    installed = abap_false ) INTO me->amazon_root_certs_https INDEX 7 ##NO_TEXT.
+    INSERT VALUE #( subject = 'CN=Amazon ECDSA 384 Root EU M1, O=Amazon, C=DE'
+                    uri = 'https://www.amazontrust.com/repository/Amazon-ECDSA-384-Root-EU-M1-Self-Signed.cer'
+                    binary = ''
+                    installed = abap_false ) INTO me->amazon_root_certs_https INDEX 8 ##NO_TEXT.
   ENDMETHOD.
 
 
   METHOD init_github_root_certs.
     INSERT VALUE #( subject = 'CN=USERTrust RSA Certification Authority, O=The USERTRUST Network, L=Jersey City, SP=New Jersey, C=US'
-        uri = 'http://crt.usertrust.com/USERTrustRSAAAACA.crt'
-        binary = ''
-        installed = abap_false ) INTO me->github_root_certs_http INDEX 1 ##NO_TEXT.
+                    uri = 'http://crt.usertrust.com/USERTrustRSAAAACA.crt'
+                    binary = ''
+                    installed = abap_false ) INTO me->github_root_certs_http INDEX 1 ##NO_TEXT.
 
     INSERT VALUE #( subject = 'CN=Sectigo RSA Domain Validation Secure Server CA, O=Sectigo Limited, L=Salford, SP=Greater Manchester, C=GB'
-              uri = 'http://crt.sectigo.com/SectigoRSADomainValidationSecureServerCA.crt'
-              binary = ''
-              installed = abap_false ) INTO me->github_root_certs_http INDEX 2 ##NO_TEXT.
+                    uri = 'http://crt.sectigo.com/SectigoRSADomainValidationSecureServerCA.crt'
+                    binary = ''
+                    installed = abap_false ) INTO me->github_root_certs_http INDEX 2 ##NO_TEXT.
   ENDMETHOD.
 
 
@@ -926,7 +940,7 @@ CLASS lcl_sdk_certificate_manager IMPLEMENTATION.
     ls_strust_identity-sprsl = c_pse_sprsl.
 
     " root cert URLS set in set_*_root_cert_values
-    LOOP AT ct_certificates assigning field-symbol(<certificate>).
+    LOOP AT ct_certificates ASSIGNING FIELD-SYMBOL(<certificate>).
 
       IF <certificate>-installed = abap_true.
         CONTINUE.
@@ -936,7 +950,7 @@ CLASS lcl_sdk_certificate_manager IMPLEMENTATION.
                                  sep   = '/'
                                  index = -1 ).
       <certificate>-binary = internet_manager->download( i_absolute_uri = <certificate>-uri
-                                                          i_blankstocrlf = abap_false ).
+                                                         i_blankstocrlf = abap_false ).
       CALL FUNCTION 'SSFR_PUT_CERTIFICATE'
         EXPORTING
           is_strust_identity = ls_strust_identity
@@ -4356,7 +4370,7 @@ CLASS lcl_ui_command_chk_upd IMPLEMENTATION.
 
     IF lv_answer = 1.
       TRY.
-          certificate_manager->install_certs( changing ct_certificates = cert_mgr_lcl->github_root_certs_http ).
+          certificate_manager->install_certs( CHANGING ct_certificates = cert_mgr_lcl->github_root_certs_http ).
           r_result = abap_true.
         CATCH lcx_error INTO DATA(ex).
           ex->show( ).
@@ -4381,9 +4395,9 @@ ENDCLASS.
 CLASS lcl_ui_command_dow_crt IMPLEMENTATION.
   METHOD lif_ui_command~execute.
     DATA(cert_mgr_lcl) = CAST lcl_sdk_certificate_manager( certificate_manager ).
-    certificate_manager->install_certs( changing ct_certificates = cert_mgr_lcl->amazon_root_certs_http ).
-    certificate_manager->install_certs( changing ct_certificates = cert_mgr_lcl->amazon_root_certs_https ).
-    certificate_manager->install_certs( changing ct_certificates = cert_mgr_lcl->github_root_certs_http ).
+    certificate_manager->install_certs( CHANGING ct_certificates = cert_mgr_lcl->amazon_root_certs_http ).
+    certificate_manager->install_certs( CHANGING ct_certificates = cert_mgr_lcl->amazon_root_certs_https ).
+    certificate_manager->install_certs( CHANGING ct_certificates = cert_mgr_lcl->github_root_certs_http ).
   ENDMETHOD.
 
   METHOD lif_ui_command~can_execute.
@@ -6076,8 +6090,13 @@ CLASS lcl_sdk_installer IMPLEMENTATION.
       ENDIF.
 
       IF lv_answer = 1.
-        certificate_manager->install_certs( changing ct_certificates = cert_mgr_lcl->amazon_root_certs_http ). " Needed before HTTPS can be downloaded
-        certificate_manager->install_certs( changing ct_certificates = cert_mgr_lcl->amazon_root_certs_https ).
+        TRY.
+            certificate_manager->install_certs( CHANGING ct_certificates = cert_mgr_lcl->amazon_root_certs_http ). " Needed before HTTPS can be downloaded
+            certificate_manager->install_certs( CHANGING ct_certificates = cert_mgr_lcl->amazon_root_certs_https ).
+          CATCH lcx_error INTO DATA(ex).
+            ex->show( ).
+            LEAVE PROGRAM.
+        ENDTRY.
       ELSE.
         LEAVE PROGRAM.
       ENDIF.
